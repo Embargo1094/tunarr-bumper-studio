@@ -1,0 +1,21 @@
+services:
+  tunarr-bumper-studio:
+    image: ghcr.io/embargo1094/tunarr-bumper-studio:latest
+    container_name: tunarr-bumper-studio
+    restart: unless-stopped
+    ports:
+      - "8420:8420"
+    volumes:
+      # Settings, channel profiles, uploaded backgrounds/music/fonts
+      - bumper_data:/data/config
+      - bumper_uploads:/data/uploads
+      # Rendered bumpers; the same host folder Tunarr's "Generated Bumpers"
+      # local media source reads (mounted in Tunarr as /Bumpers)
+      - /srv/media/bumpers:/data/output
+    labels:
+      # Lets Watchtower pull new versions automatically
+      - com.centurylinklabs.watchtower.enable=true
+
+volumes:
+  bumper_data:
+  bumper_uploads:

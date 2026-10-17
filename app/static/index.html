@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tunarr Bumper Studio</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>📺 Tunarr Bumper Studio</h1>
+  <nav>
+    <button id="tab-channels" class="tab active">Channels</button>
+    <button id="tab-settings" class="tab">Settings</button>
+  </nav>
+</header>
+
+<section id="view-settings" class="view hidden">
+  <h2>Connections</h2>
+  <div class="form-grid">
+    <label>Tunarr base URL <input id="s-tunarr-url" placeholder="http://tunarr:8000"></label>
+    <label>CPU limit for rendering (% of one core, 0 = unlimited)
+      <input type="number" id="s-cpu-limit" value="0" min="0" step="10">
+    </label>
+  </div>
+  <button id="save-settings">Save Settings</button>
+  <p class="hint">No Plex connection needed — bumpers are written straight into a folder registered in
+    Tunarr as a Local Media Source, so only Tunarr itself needs to be reachable.</p>
+  <p class="hint">The CPU limit hard-caps ffmpeg's actual usage (e.g. 50 = half a core) regardless of how
+    many threads it spawns internally, trading render speed for a lighter system footprint. 0 leaves it
+    unlimited. Applies to every channel's renders.</p>
+</section>
+
+<section id="view-channels" class="view">
+  <div class="channel-list-panel">
+    <h2>Channels</h2>
+    <ul id="channel-list"></ul>
+    <button id="new-channel">+ New Channel</button>
+  </div>
+
+  <div class="editor-panel hidden" id="editor-panel">
+    <div class="editor-columns">
+      <div class="preview-col">
+        <div id="canvas-wrap">
+          <canvas id="preview-canvas" width="960" height="540"></canvas>
+        </div>
+        <div class="preview-actions">
+          <button id="render-preview">🔄 Render Real Preview</button>
+          <button id="generate-now">▶ Generate & Push Now</button>
+        </div>
+        <video id="preview-video" controls class="hidden"></video>
+        <p class="hint">Drag the labels on the canvas to position them. Canvas preview is a lightweight
+          approximation — click "Render Real Preview" to see the actual ffmpeg output.</p>
+      </div>
+
+      <div class="fields-col">
+        <label>Channel name <input id="f-name"></label>
+
+        <fieldset>
+          <legend>Tunarr mapping</legend>
+          <label>Tunarr channel <select id="f-tunarr-channel"></select></label>
+          <label>Tunarr local media source <select id="f-tunarr-mediasource"></select></label>
+          <label>Tunarr library id <input id="f-tunarr-library" placeholder="library id within that local media source"></label>
+          <p class="hint">The local media source should point at the same folder this app writes bumpers
+            into — see the README for one-time setup.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Backgrounds (picked at random each generation)</legend>
+          <input type="file" id="f-background-file" accept=".gif,.png,.jpg,.jpeg,.webp,.mp4,.webm,.mov,.mkv" multiple>
+          <ul id="background-list" class="asset-list"></ul>
+          <p class="hint">Add as many as you like — images, gifs, or video clips can be mixed together.
+            One is chosen at random on every regeneration.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Background music (picked at random, optional)</legend>
+          <input type="file" id="f-music-file" accept=".mp3,.wav,.ogg,.m4a,.aac,.flac" multiple>
+          <ul id="music-list" class="asset-list"></ul>
+          <p class="hint">If narration is also on, music ducks quietly underneath it. With no narration,
+            music plays at normal volume and fades out at the end of the clip.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Font</legend>
+          <input type="file" id="f-font-file" accept=".ttf,.otf">
+          <div id="font-preview-name" class="hint"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Rectangles / bars</legend>
+          <ul id="shape-list" class="asset-list"></ul>
+          <button id="add-shape" type="button">+ Add Rectangle</button>
+          <p class="hint">e.g. a solid bar across the bottom 20% of the screen for text to sit on.
+            Positions/sizes are in % of the frame.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>"You're Watching" text</legend>
+          <label>Prefix <input id="nw-prefix" value="YOU'RE WATCHING"></label>
+          <label>Color <input type="color" id="nw-color" value="#ffd400"></label>
+          <label>Font size <input type="number" id="nw-size" value="52"></label>
+          <label>Outline width (0 = none) <input type="number" id="nw-outline-width" value="0" min="0"></label>
+          <label>Outline color <input type="color" id="nw-outline-color" value="#000000"></label>
+          <label><input type="checkbox" id="nw-shadow" checked> Drop shadow</label>
+          <label>Shadow color <input type="color" id="nw-shadow-color" value="#000000"></label>
+          <label>Shadow offset X <input type="number" id="nw-shadow-x" value="2"></label>
+          <label>Shadow offset Y <input type="number" id="nw-shadow-y" value="2"></label>
+        </fieldset>
+
+        <fieldset>
+          <legend>"Up Next" text</legend>
+          <label>Prefix <input id="un-prefix" value="UP NEXT"></label>
+          <label>Color <input type="color" id="un-color" value="#ffffff"></label>
+          <label>Font size <input type="number" id="un-size" value="40"></label>
+          <label>Outline width (0 = none) <input type="number" id="un-outline-width" value="0" min="0"></label>
+          <label>Outline color <input type="color" id="un-outline-color" value="#000000"></label>
+          <label><input type="checkbox" id="un-shadow" checked> Drop shadow</label>
+          <label>Shadow color <input type="color" id="un-shadow-color" value="#000000"></label>
+          <label>Shadow offset X <input type="number" id="un-shadow-x" value="2"></label>
+          <label>Shadow offset Y <input type="number" id="un-shadow-y" value="2"></label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Timing & voice</legend>
+          <label>Regenerate every (minutes) <input type="number" id="f-interval" value="10" min="1"></label>
+          <label>Clip length (seconds) <input type="number" id="f-duration" value="6" min="2"></label>
+          <label>Resolution <input id="f-resolution" value="1920x1080"></label>
+          <label><input type="checkbox" id="f-tts"> Voice narration (requires a Piper voice model)</label>
+          <label>Piper voice model path <input id="f-voice" placeholder="/data/uploads/voices/en_US-lessac-medium.onnx"></label>
+          <p class="hint">Download a voice's .onnx + .onnx.json pair from the Piper voices repo and place both
+            in the uploads volume, then point this at the .onnx path. Leave narration off if you'd rather skip TTS.</p>
+          <label><input type="checkbox" id="f-enabled" checked> Enabled</label>
+        </fieldset>
+
+        <div class="editor-buttons">
+          <button id="save-channel">Save Channel</button>
+          <button id="delete-channel" class="danger">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="/app.js"></script>
+</body>
+</html>
