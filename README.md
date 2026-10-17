@@ -114,6 +114,19 @@ on your regeneration interval (not continuously), a lower limit just makes
 each individual render take longer — it doesn't affect anything else about
 how often bumpers update.
 
+## Multiple channels
+
+Each channel profile writes its own file, named after the profile:
+`Bumpers/<Channel name>/<Channel name> - Up Next.mp4`. They all live in the
+one "Generated Bumpers" library in Tunarr; add each channel's file only to
+that channel's filler list. Renaming a profile renames its file (and Tunarr
+will see it as a new item); deleting a profile removes its file.
+
+Only one bumper renders at a time across the whole app. When several channels
+are due at once they queue up, so the CPU limit holds for the app as a whole.
+Saving a profile renders it right away. "Render Real Preview" writes to a
+separate preview file and never touches what Tunarr plays.
+
 ## Storage notes
 
 Rendered clips are a few MB and only regenerate on the interval you set (a few

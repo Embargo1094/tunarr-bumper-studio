@@ -1,9 +1,13 @@
 import json
+import logging
 import os
 import random
+import re
 import shutil
 import tempfile
+import threading
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -19,8 +23,17 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CONFIG_DIR = DATA_DIR / "config"
 UPLOAD_DIR = DATA_DIR / "uploads"
 OUTPUT_DIR = DATA_DIR / "output"
-for d in (CONFIG_DIR, UPLOAD_DIR, OUTPUT_DIR):
+# Renders happen here first, then get moved into OUTPUT_DIR finished, so Tunarr
+# never sees a half-written file. Previews live here too and never reach Tunarr.
+WORK_DIR = DATA_DIR / "work"
+PREVIEW_DIR = WORK_DIR / "previews"
+for d in (CONFIG_DIR, UPLOAD_DIR, OUTPUT_DIR, WORK_DIR, PREVIEW_DIR):
     d.mkdir(parents=True, exist_ok=True)
+
+# Only one bumper renders at a time across the whole app, so the CPU limit
+# holds no matter how many channels are due at once.
+RENDER_LOCK = threading.Lock()
+log = logging.getLogger("bumper-studio")
 
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 CHANNELS_FILE = CONFIG_DIR / "channels.json"
@@ -75,6 +88,36 @@ def get_channels():
 
 def save_channels(channels):
     save_json(CHANNELS_FILE, channels)
+
+
+def _safe_name(name: str) -> str:
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", name or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().strip(".")
+    return cleaned or "Channel"
+
+
+def output_folder_name(channel: dict, channels: list | None = None) -> str:
+    """Readable per-channel folder name, e.g. "Adult Swim". Two profiles with the
+    same name get a short id suffix so their files never collide."""
+    base = _safe_name(channel.get("name"))
+    others = channels if channels is not None else get_channels()
+    if any(c["id"] != channel["id"] and _safe_name(c.get("name")).lower() == base.lower() for c in others):
+        base = f"{base} ({channel['id'][:6]})"
+    return base
+
+
+def output_path_for(channel: dict, channels: list | None = None) -> Path:
+    folder = output_folder_name(channel, channels)
+    return OUTPUT_DIR / folder / f"{folder} - Up Next.mp4"
+
+
+def _remove_output_folder(folder: Path):
+    # Only ever delete direct children of OUTPUT_DIR.
+    try:
+        if folder.exists() and folder.resolve().parent == OUTPUT_DIR.resolve():
+            shutil.rmtree(folder)
+    except Exception as e:
+        log.warning("Couldn't remove old output folder %s: %s", folder, e)
 
 
 def get_channel_or_404(channel_id: str):
@@ -150,8 +193,7 @@ def api_create_channel(ch: ChannelIn):
         data["up_next"] = DEFAULT_FIELDS["up_next"]
     channels.append(data)
     save_channels(channels)
-    (OUTPUT_DIR / new_id).mkdir(parents=True, exist_ok=True)
-    _schedule_channel(data)
+    _schedule_channel(data, run_now=True)
     return data
 
 
@@ -160,22 +202,35 @@ def api_update_channel(channel_id: str, ch: ChannelIn):
     channels = get_channels()
     for i, c in enumerate(channels):
         if c["id"] == channel_id:
+            old_folder = output_path_for(c, channels).parent
             data = ch.dict()
             data["id"] = channel_id
             channels[i] = data
             save_channels(channels)
-            _schedule_channel(data)
+            new_folder = output_path_for(data, channels).parent
+            if old_folder != new_folder:
+                _remove_output_folder(old_folder)
+            _remove_output_folder(OUTPUT_DIR / channel_id)  # pre-rename layout
+            _schedule_channel(data, run_now=True)
             return data
     raise HTTPException(404, "channel not found")
 
 
 @app.delete("/api/channels/{channel_id}")
 def api_delete_channel(channel_id: str):
-    channels = [c for c in get_channels() if c["id"] != channel_id]
+    all_channels = get_channels()
+    doomed = next((c for c in all_channels if c["id"] == channel_id), None)
+    channels = [c for c in all_channels if c["id"] != channel_id]
     save_channels(channels)
     job_id = f"channel-{channel_id}"
     if scheduler.get_job(job_id):
         scheduler.remove_job(job_id)
+    if doomed:
+        _remove_output_folder(output_path_for(doomed, all_channels).parent)
+    _remove_output_folder(OUTPUT_DIR / channel_id)
+    preview = PREVIEW_DIR / f"{channel_id}.mp4"
+    if preview.exists():
+        preview.unlink()
     return {"ok": True}
 
 
@@ -289,6 +344,13 @@ def _build_fields(channel: dict, now_title: str, next_title: str, next_time: str
 
 
 def generate_for_channel(channel: dict, use_placeholder: bool = False):
+    """Renders one channel's bumper. Holds RENDER_LOCK, so renders from the
+    scheduler and from the buttons in the UI all queue up and run one at a time."""
+    with RENDER_LOCK:
+        return _render_channel(channel, use_placeholder)
+
+
+def _render_channel(channel: dict, use_placeholder: bool = False):
     settings = get_settings()
 
     if use_placeholder:
@@ -324,10 +386,11 @@ def generate_for_channel(channel: dict, use_placeholder: bool = False):
         tmp_audio = tempfile.NamedTemporaryFile(suffix=".m4a", delete=False).name
         audio_path = engine.mix_audio(narration_path, music_path, duration, tmp_audio, cpu_limit_percent=cpu_limit_percent)
 
-    out_dir = OUTPUT_DIR / channel["id"]
-    out_dir.mkdir(parents=True, exist_ok=True)
-    final_path = out_dir / "bumper.mp4"
-    tmp_out = out_dir / f"bumper_{uuid.uuid4().hex}.mp4"
+    if use_placeholder:
+        final_path = PREVIEW_DIR / f"{channel['id']}.mp4"
+    else:
+        final_path = output_path_for(channel)
+    tmp_out = WORK_DIR / f"render_{uuid.uuid4().hex}.mp4"
 
     backgrounds = channel.get("backgrounds") or []
     valid_backgrounds = [b for b in backgrounds if b.get("path") and os.path.exists(b["path"])]
@@ -335,19 +398,24 @@ def generate_for_channel(channel: dict, use_placeholder: bool = False):
         raise RuntimeError("No background image/gif/video configured for this channel.")
     background = random.choice(valid_backgrounds)
 
-    engine.render_bumper(
-        background=background,
-        resolution=channel.get("resolution", "1920x1080"),
-        duration_seconds=duration,
-        shapes=channel.get("shapes") or [],
-        fields=fields,
-        cpu_limit_percent=cpu_limit_percent,
-        font_path=channel.get("font_path", ""),
-        audio_path=audio_path,
-        out_path=str(tmp_out),
-    )
+    try:
+        engine.render_bumper(
+            background=background,
+            resolution=channel.get("resolution", "1920x1080"),
+            duration_seconds=duration,
+            shapes=channel.get("shapes") or [],
+            fields=fields,
+            cpu_limit_percent=cpu_limit_percent,
+            font_path=channel.get("font_path", ""),
+            audio_path=audio_path,
+            out_path=str(tmp_out),
+        )
+    except Exception:
+        if tmp_out.exists():
+            tmp_out.unlink()
+        raise
 
-    tmp_out.replace(final_path)
+    _publish(tmp_out, final_path)
     if audio_path and os.path.exists(audio_path):
         os.remove(audio_path)
     if narration_path and narration_path != audio_path and os.path.exists(narration_path):
@@ -365,6 +433,17 @@ def generate_for_channel(channel: dict, use_placeholder: bool = False):
             return {"ok": True, "file": str(final_path), "rescan_warning": str(e)}
 
     return {"ok": True, "file": str(final_path)}
+
+
+def _publish(src: Path, final_path: Path):
+    """Moves a finished render into place. The copy lands under a hidden
+    non-video name first, then gets renamed, so Tunarr only ever sees a
+    complete file."""
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    staging = final_path.parent / f".{final_path.name}.partial"
+    shutil.copyfile(src, staging)
+    os.replace(staging, final_path)
+    src.unlink()
 
 
 @app.post("/api/channels/{channel_id}/generate")
@@ -388,9 +467,9 @@ def api_preview(channel_id: str):
 
 @app.get("/api/channels/{channel_id}/preview.mp4")
 def serve_preview(channel_id: str):
-    path = OUTPUT_DIR / channel_id / "bumper.mp4"
+    path = PREVIEW_DIR / f"{channel_id}.mp4"
     if not path.exists():
-        raise HTTPException(404, "no bumper generated yet")
+        raise HTTPException(404, "no preview rendered yet")
     return FileResponse(path, media_type="video/mp4")
 
 
@@ -398,14 +477,27 @@ def serve_preview(channel_id: str):
 # scheduler
 # ---------------------------------------------------------------------------
 
-def _schedule_channel(channel: dict):
+def _scheduled_render(channel_id: str):
+    # Always render from the latest saved profile, not a copy captured at scheduling time.
+    channel = next((c for c in get_channels() if c["id"] == channel_id), None)
+    if channel is None:
+        return
+    try:
+        generate_for_channel(channel)
+    except Exception as e:
+        log.error("Bumper render failed for %s: %s", channel.get("name"), e)
+
+
+def _schedule_channel(channel: dict, run_now: bool = False):
     job_id = f"channel-{channel['id']}"
     if scheduler.get_job(job_id):
         scheduler.remove_job(job_id)
     if channel.get("enabled", True):
+        kwargs = {"next_run_time": datetime.now()} if run_now else {}
         scheduler.add_job(
-            generate_for_channel, IntervalTrigger(minutes=channel.get("interval_minutes", 10)),
-            args=[channel], id=job_id, replace_existing=True, max_instances=1,
+            _scheduled_render, IntervalTrigger(minutes=channel.get("interval_minutes", 10)),
+            args=[channel["id"]], id=job_id, replace_existing=True, max_instances=1,
+            coalesce=True, misfire_grace_time=None, **kwargs,
         )
 
 
@@ -413,9 +505,17 @@ def _schedule_channel(channel: dict):
 def on_startup():
     if not SETTINGS_FILE.exists():
         save_json(SETTINGS_FILE, DEFAULT_SETTINGS)
+    for leftover in WORK_DIR.glob("render_*.mp4"):
+        leftover.unlink()
     scheduler.start()
-    for c in get_channels():
-        _schedule_channel(c)
+    channels = get_channels()
+    for c in channels:
+        legacy = OUTPUT_DIR / c["id"]
+        moved = legacy.exists()
+        _remove_output_folder(legacy)  # old "<id>/bumper.mp4" layout
+        # Render right away if this channel's file doesn't exist yet (first run
+        # after this update, or a fresh volume) so Tunarr always has something.
+        _schedule_channel(c, run_now=moved or not output_path_for(c, channels).exists())
 
 
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
