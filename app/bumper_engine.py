@@ -18,6 +18,10 @@ import requests
 # Tunarr: figure out what's currently airing and what's next on a channel
 # ---------------------------------------------------------------------------
 
+# Guide entries shorter than this are treated as filler, not shows.
+FILLER_MAX_SECONDS = 150
+
+
 def _parse_xmltv_time(raw: str) -> datetime:
     # XMLTV times look like "20260809180000 +0000"
     raw = raw.strip()
@@ -116,26 +120,44 @@ def fetch_now_next(
             "or the guide hasn't generated yet."
         )
 
-    programmes.sort(key=lambda p: p[0])
+    # Ignore guide entries that aren't real shows: our own bumpers, other short
+    # filler (bumpers, ads, IDs), and flex blocks Tunarr titles with the channel name.
+    channel_name_lc = (channel_name or "").strip().lower()
+
+    def _is_show(p):
+        start, stop, title = p
+        t = title.strip().lower()
+        if t.endswith(" - up next"):
+            return False
+        if channel_name_lc and t == channel_name_lc:
+            return False
+        return (stop - start).total_seconds() >= FILLER_MAX_SECONDS
+
+    shows = [p for p in programmes if _is_show(p)] or programmes
+    shows.sort(key=lambda p: p[0])
 
     current = None
     upcoming = None
-    for i, (start, stop, title) in enumerate(programmes):
+    for i, (start, stop, title) in enumerate(shows):
         if start <= now < stop:
             current = (start, stop, title)
-            if i + 1 < len(programmes):
-                upcoming = programmes[i + 1]
+            if i + 1 < len(shows):
+                upcoming = shows[i + 1]
             break
 
     if current is None:
-        # Nothing airing "right now" per the guide (gap/flex) - just use the next upcoming entry
-        # as both "now" and "next" fallback so the bumper still renders something sane.
-        future = [p for p in programmes if p[0] >= now]
-        if future:
+        # Between shows (e.g. this bumper is playing as post-roll filler right now):
+        # "now" is the show that just ended, "next" is the next one to start.
+        past = [p for p in shows if p[1] <= now]
+        future = [p for p in shows if p[0] > now]
+        if past:
+            current = past[-1]
+            upcoming = future[0] if future else None
+        elif future:
             current = future[0]
             upcoming = future[1] if len(future) > 1 else None
         else:
-            current = programmes[-1]
+            current = shows[-1]
             upcoming = None
 
     result = {
