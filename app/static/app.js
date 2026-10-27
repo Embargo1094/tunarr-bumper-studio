@@ -119,12 +119,12 @@ function clearEditorForm() {
   $("f-duration").value = 6;
   $("f-resolution").value = "1920x1080";
   $("f-tts").checked = false;
+  $("f-fade").checked = true;
   $("f-voice").value = "";
   $("f-enabled").checked = true;
 
   $("nw-source").value = "next";
-  $("nw-prefix").value = "UP NEXT";
-  $("nw-time").checked = false;
+  $("nw-template").value = "UP NEXT: {show}";
   $("nw-color").value = "#ffd400";
   $("nw-size").value = 52;
   $("nw-outline-width").value = 0;
@@ -135,8 +135,7 @@ function clearEditorForm() {
   $("nw-shadow-y").value = 2;
 
   $("un-source").value = "after_next";
-  $("un-prefix").value = "FOLLOWED BY";
-  $("un-time").checked = false;
+  $("un-template").value = "FOLLOWED BY: {show}";
   $("un-color").value = "#ffffff";
   $("un-size").value = 40;
   $("un-outline-width").value = 0;
@@ -170,13 +169,13 @@ function fillEditorForm(c) {
   $("f-duration").value = c.duration_seconds;
   $("f-resolution").value = c.resolution;
   $("f-tts").checked = !!c.tts_enabled;
+  $("f-fade").checked = c.fade_enabled !== false;
   $("f-voice").value = c.tts_voice || "";
   $("f-enabled").checked = !!c.enabled;
 
   const nw = c.now_watching || {};
   $("nw-source").value = nw.source || "current";
-  $("nw-prefix").value = nw.prefix ?? "YOU'RE WATCHING";
-  $("nw-time").checked = nw.show_time ?? false;
+  $("nw-template").value = templateFor(nw, "YOU'RE WATCHING", false);
   $("nw-color").value = nw.color || "#ffd400";
   $("nw-size").value = nw.font_size || 52;
   $("nw-outline-width").value = nw.outline_width || 0;
@@ -188,8 +187,7 @@ function fillEditorForm(c) {
 
   const un = c.up_next || {};
   $("un-source").value = un.source || "next";
-  $("un-prefix").value = un.prefix ?? "UP NEXT";
-  $("un-time").checked = un.show_time ?? true;
+  $("un-template").value = templateFor(un, "UP NEXT", true);
   $("un-color").value = un.color || "#ffffff";
   $("un-size").value = un.font_size || 40;
   $("un-outline-width").value = un.outline_width || 0;
@@ -405,18 +403,35 @@ function drawCanvas() {
       shadowY: parseInt($("un-shadow-y").value || 0),
     });
 }
-const PREVIEW_SHOWS = {
-  current: ["Example Show", ""],
-  next: ["Next Example Show", "8:30 PM"],
-  after_next: ["Later Example Show", "9:00 PM"],
+const PREVIEW_VALUES = {
+  current: "Example Show", current_time: "8:00 PM",
+  next: "Next Example Show", next_time: "8:30 PM",
+  after_next: "Later Example Show", after_next_time: "9:00 PM",
 };
+const PLACEHOLDERS = {
+  show: "show", time: "time",
+  current: "current", currentshow: "current", now: "current",
+  next: "next", nextshow: "next",
+  later: "after_next", latershow: "after_next", after_next: "after_next", afternext: "after_next",
+  current_time: "current_time", now_time: "current_time", next_time: "next_time",
+  later_time: "after_next_time", after_next_time: "after_next_time",
+};
+// Same conversion the server does for profiles saved before templates existed.
+function templateFor(line, legacyPrefix, legacyTime) {
+  if (line.template !== undefined) return line.template;
+  const prefix = (line.prefix ?? legacyPrefix).trim();
+  let t = prefix ? `${prefix}: {show}` : "{show}";
+  const source = line.source || (legacyTime ? "next" : "current");
+  if ((line.show_time ?? legacyTime) && source !== "current") t += " AT {time}";
+  return t;
+}
 function previewText(pfx) {
   const source = $(`${pfx}-source`).value;
-  const [title, time] = PREVIEW_SHOWS[source] || PREVIEW_SHOWS.next;
-  const prefix = $(`${pfx}-prefix`).value.trim();
-  let text = prefix ? `${prefix}: ${title}` : title;
-  if ($(`${pfx}-time`).checked && source !== "current") text += ` AT ${time}`;
-  return text;
+  const values = { ...PREVIEW_VALUES, show: PREVIEW_VALUES[source], time: PREVIEW_VALUES[`${source}_time`] };
+  return $(`${pfx}-template`).value.replace(/\{\s*([A-Za-z_]+)\s*\}/g, (m, name) => {
+    const key = PLACEHOLDERS[name.toLowerCase()];
+    return key ? values[key] : m;
+  }).replace(/\s{2,}/g, " ").trim();
 }
 function hexToRgba(hex, alpha) {
   const h = hex.replace("#", "");
@@ -469,9 +484,9 @@ window.addEventListener("mouseup", () => { state.dragTarget = null; });
 
 // redraw live as text/style options change
 [
-  "nw-source", "nw-time", "nw-prefix", "nw-color", "nw-size", "nw-outline-width", "nw-outline-color",
+  "nw-source", "nw-template", "nw-color", "nw-size", "nw-outline-width", "nw-outline-color",
   "nw-shadow", "nw-shadow-color", "nw-shadow-x", "nw-shadow-y",
-  "un-source", "un-time", "un-prefix", "un-color", "un-size", "un-outline-width", "un-outline-color",
+  "un-source", "un-template", "un-color", "un-size", "un-outline-width", "un-outline-color",
   "un-shadow", "un-shadow-color", "un-shadow-x", "un-shadow-y",
 ].forEach(id => {
   $(id).addEventListener("input", drawCanvas);
@@ -499,8 +514,7 @@ function collectPayload() {
     shapes: state.shapes,
     font_path: state.uploadedFont ? state.uploadedFont.path : "",
     now_watching: {
-      source: $("nw-source").value, show_time: $("nw-time").checked,
-      prefix: $("nw-prefix").value, color: $("nw-color").value,
+      source: $("nw-source").value, template: $("nw-template").value, color: $("nw-color").value,
       font_size: parseInt($("nw-size").value), x_pct: state.fields.now_watching.x_pct,
       y_pct: state.fields.now_watching.y_pct,
       outline_width: parseInt($("nw-outline-width").value) || 0,
@@ -511,8 +525,7 @@ function collectPayload() {
       shadow_y: parseInt($("nw-shadow-y").value) || 0,
     },
     up_next: {
-      source: $("un-source").value, show_time: $("un-time").checked,
-      prefix: $("un-prefix").value, color: $("un-color").value,
+      source: $("un-source").value, template: $("un-template").value, color: $("un-color").value,
       font_size: parseInt($("un-size").value), x_pct: state.fields.up_next.x_pct,
       y_pct: state.fields.up_next.y_pct,
       outline_width: parseInt($("un-outline-width").value) || 0,
@@ -522,6 +535,7 @@ function collectPayload() {
       shadow_x: parseInt($("un-shadow-x").value) || 0,
       shadow_y: parseInt($("un-shadow-y").value) || 0,
     },
+    fade_enabled: $("f-fade").checked,
     tts_enabled: $("f-tts").checked,
     tts_voice: $("f-voice").value,
     enabled: $("f-enabled").checked,

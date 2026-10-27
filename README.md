@@ -116,12 +116,26 @@ how often bumpers update.
 
 ## Text lines
 
-Each bumper has two text lines. For each one you choose which show it names
-(the current show, the next show, or the show after next), its prefix, and
-whether to add the start time. New profiles default to "UP NEXT: <next show>"
-and "FOLLOWED BY: <show after next>", which suits bumpers that play after each
-episode. Narration reads the same lines that are on screen. If there's no show
-after next in the guide yet, that line is left off.
+Each bumper has two text lines. Each line is free text with placeholders:
+
+| Placeholder | Fills in |
+|---|---|
+| `{show}`, `{time}` | the show picked in that line's dropdown, and its start time |
+| `{current}`, `{current_time}` | the current show (the one that just ended, when the bumper plays after an episode) |
+| `{next}`, `{next_time}` | the next show (`{nextshow}` works too) |
+| `{later}`, `{later_time}` | the show after next |
+
+New profiles default to `UP NEXT: {show}` (next show) and `FOLLOWED BY: {show}`
+(show after next). Example with times: `UP NEXT: {next} AT {next_time}`. A line
+that names a show the guide doesn't have yet is left off; an unknown placeholder
+is left as typed so typos are easy to spot. Profiles saved before templates
+existed are converted automatically, keeping their wording.
+
+Narration reads the same lines. Typed words in ALL CAPS are read as normal
+words, and a colon becomes a short pause; show names and times are read as-is.
+
+"Fade text and music in/out" (on by default) fades the text over the first and
+last half second and fades the music out at the end. Turn it off for hard cuts.
 
 Start times use the `TZ` setting in the stack (default `America/New_York`).
 

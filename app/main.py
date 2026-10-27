@@ -50,13 +50,13 @@ DEFAULT_SETTINGS = {
 
 DEFAULT_FIELDS = {
     "now_watching": {
-        "prefix": "UP NEXT", "source": "next", "show_time": False,
+        "template": "UP NEXT: {show}", "source": "next",
         "x_pct": 8, "y_pct": 68, "font_size": 52, "color": "#FFD400",
         "outline_width": 0, "outline_color": "#000000",
         "shadow_enabled": True, "shadow_color": "#000000", "shadow_x": 2, "shadow_y": 2,
     },
     "up_next": {
-        "prefix": "FOLLOWED BY", "source": "after_next", "show_time": False,
+        "template": "FOLLOWED BY: {show}", "source": "after_next",
         "x_pct": 8, "y_pct": 80, "font_size": 40, "color": "#FFFFFF",
         "outline_width": 0, "outline_color": "#000000",
         "shadow_enabled": True, "shadow_color": "#000000", "shadow_x": 2, "shadow_y": 2,
@@ -179,6 +179,7 @@ class ChannelIn(BaseModel):
     font_path: str = ""
     now_watching: dict = None
     up_next: dict = None
+    fade_enabled: bool = True
     tts_enabled: bool = False
     tts_voice: str = ""
     enabled: bool = True
@@ -342,37 +343,85 @@ def api_tunarr_media_sources():
 # generation
 # ---------------------------------------------------------------------------
 
-# Which show each text line names. Profiles saved before this option existed
-# keep their old behavior: line 1 = current show, line 2 = next show + time.
+# Text lines are templates with placeholders filled in at render time.
+# {show} / {time} mean the show picked in that line's "Shows" dropdown; the
+# others name a specific show no matter what the dropdown says.
+PLACEHOLDERS = {
+    "show": "show", "time": "time",
+    "current": "current", "currentshow": "current", "now": "current",
+    "next": "next", "nextshow": "next",
+    "later": "after_next", "latershow": "after_next", "after_next": "after_next", "afternext": "after_next",
+    "current_time": "current_time", "now_time": "current_time",
+    "next_time": "next_time",
+    "later_time": "after_next_time", "after_next_time": "after_next_time",
+}
+SHOW_KEYS = {"show", "current", "next", "after_next"}
+PLACEHOLDER_RE = re.compile(r"\{\s*([A-Za-z_]+)\s*\}")
+
+# Profiles saved before templates existed: line 1 named the current show,
+# line 2 the next show plus its start time.
 LEGACY_LINE_DEFAULTS = {
-    "now_watching": {"source": "current", "show_time": False},
-    "up_next": {"source": "next", "show_time": True},
+    "now_watching": {"source": "current", "show_time": False, "prefix": "YOU'RE WATCHING"},
+    "up_next": {"source": "next", "show_time": True, "prefix": "UP NEXT"},
 }
 
 
 def _line_settings(channel: dict, key: str) -> dict:
     line = dict(channel.get(key) or DEFAULT_FIELDS[key])
-    for k, v in LEGACY_LINE_DEFAULTS[key].items():
-        line.setdefault(k, v)
+    if "template" not in line:
+        legacy = LEGACY_LINE_DEFAULTS[key]
+        line.setdefault("source", legacy["source"])
+        prefix = (line.get("prefix", legacy["prefix"]) or "").strip()
+        template = f"{prefix}: {{show}}" if prefix else "{show}"
+        if line.get("show_time", legacy["show_time"]) and line["source"] != "current":
+            template += " AT {time}"
+        line["template"] = template
+    line.setdefault("source", "next")
     return line
 
 
+def fill_template(template: str, values: dict) -> list[tuple[bool, str]] | None:
+    """Returns the line as (is_placeholder, text) segments, or None if it names a
+    show the guide doesn't have (so the line is left off instead of half-empty).
+    Unknown placeholders are left as typed, so typos are visible."""
+    segments, pos = [], 0
+    for m in PLACEHOLDER_RE.finditer(template):
+        if m.start() > pos:
+            segments.append((False, template[pos:m.start()]))
+        key = PLACEHOLDERS.get(m.group(1).lower())
+        if key is None:
+            segments.append((False, m.group(0)))
+        else:
+            value = values.get(key) or ""
+            if key in SHOW_KEYS and not value:
+                return None
+            segments.append((True, value))
+        pos = m.end()
+    if pos < len(template):
+        segments.append((False, template[pos:]))
+    return segments
+
+
+def _join(segments) -> str:
+    return re.sub(r"\s{2,}", " ", "".join(t for _, t in segments)).strip()
+
+
 def _build_lines(channel: dict, shows: dict) -> list[dict]:
-    """shows: {"current": (title, time), "next": (title, time), "after_next": (title, time)}
-    Returns one entry per text line that has a show to name."""
+    """shows: {"current": (title, time), "next": (title, time), "after_next": (title, time)}"""
     lines = []
     for key in ("now_watching", "up_next"):
         line = _line_settings(channel, key)
-        title, start = shows.get(line["source"]) or (None, "")
-        if not title:
+        values = {}
+        for name in ("current", "next", "after_next"):
+            title, start = shows.get(name) or (None, "")
+            values[name], values[f"{name}_time"] = title or "", start or ""
+        values["show"] = values.get(line["source"], "")
+        values["time"] = values.get(f"{line['source']}_time", "")
+        segments = fill_template(line.get("template") or "", values)
+        if not segments or not _join(segments):
             continue
-        prefix = (line.get("prefix") or "").strip()
-        text = f"{prefix}: {title}" if prefix else title
-        if line.get("show_time") and start and line["source"] != "current":
-            text += f" AT {start}"
         lines.append({
-            "text": text, "prefix": prefix, "title": title,
-            "start": start if line.get("show_time") and line["source"] != "current" else "",
+            "text": _join(segments), "segments": segments,
             "x_pct": line.get("x_pct", 8), "y_pct": line.get("y_pct", 68 if key == "now_watching" else 80),
             "font_size": line.get("font_size", 52 if key == "now_watching" else 40),
             "color": line.get("color", "#FFFFFF"),
@@ -384,17 +433,23 @@ def _build_lines(channel: dict, shows: dict) -> list[dict]:
 
 
 def _narration_for(lines: list[dict]) -> str:
-    """Speaks the same lines that are on screen, e.g.
-    "Up next, The Outer Limits. Followed by, The Twilight Zone, at 9:00 PM." """
-    parts = []
+    """Speaks the on-screen lines. Typed words in ALL CAPS are read as normal
+    words ("UP NEXT" -> "Up next"); show names are kept exactly as they are."""
+    sentences = []
     for line in lines:
-        prefix = line["prefix"].rstrip(":").strip()
-        spoken = (prefix[:1].upper() + prefix[1:].lower() + ", ") if prefix else ""
-        sentence = f"{spoken}{line['title']}"
-        if line["start"]:
-            sentence += f", at {line['start']}"
-        parts.append(sentence + ".")
-    return " ".join(parts)
+        spoken = []
+        for is_value, text in line["segments"]:
+            if not is_value:
+                # Only typed text is adjusted; show names and times are read as-is.
+                if text.isupper():
+                    text = text.lower()
+                text = re.sub(r"\s*:\s*", ", ", text)
+            spoken.append(text)
+        sentence = re.sub(r"\s{2,}", " ", "".join(spoken)).strip(" ,")
+        if sentence:
+            sentence = sentence[0].upper() + sentence[1:]
+            sentences.append(sentence if sentence[-1] in ".!?" else sentence + ".")
+    return " ".join(sentences)
 
 
 def generate_for_channel(channel: dict, use_placeholder: bool = False):
@@ -409,7 +464,7 @@ def _render_channel(channel: dict, use_placeholder: bool = False):
 
     if use_placeholder:
         shows = {
-            "current": ("Example Show", ""),
+            "current": ("Example Show", "8:00 PM"),
             "next": ("Next Example Show", "8:30 PM"),
             "after_next": ("Later Example Show", "9:00 PM"),
         }
@@ -421,7 +476,7 @@ def _render_channel(channel: dict, use_placeholder: bool = False):
         )
         fmt = lambda dt: engine.format_next_time(dt) if dt else ""
         shows = {
-            "current": (info["now_title"], ""),
+            "current": (info["now_title"], fmt(info.get("now_start"))),
             "next": (info["next_title"], fmt(info["next_start"])),
             "after_next": (info.get("later_title"), fmt(info.get("later_start"))),
         }
@@ -446,7 +501,8 @@ def _render_channel(channel: dict, use_placeholder: bool = False):
     audio_path = None
     if narration_path or music_path:
         tmp_audio = tempfile.NamedTemporaryFile(suffix=".m4a", delete=False).name
-        audio_path = engine.mix_audio(narration_path, music_path, duration, tmp_audio, cpu_limit_percent=cpu_limit_percent)
+        audio_path = engine.mix_audio(narration_path, music_path, duration, tmp_audio, cpu_limit_percent=cpu_limit_percent,
+                                      fade=channel.get("fade_enabled", True))
 
     if use_placeholder:
         final_path = PREVIEW_DIR / f"{channel['id']}.mp4"
@@ -475,6 +531,7 @@ def _render_channel(channel: dict, use_placeholder: bool = False):
             shapes=channel.get("shapes") or [],
             fields=fields,
             cpu_limit_percent=cpu_limit_percent,
+            fade=channel.get("fade_enabled", True),
             font_path=channel.get("font_path", ""),
             audio_path=audio_path,
             out_path=str(tmp_out),

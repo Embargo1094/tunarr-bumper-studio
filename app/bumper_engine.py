@@ -155,6 +155,7 @@ def fetch_now_next(
     current, upcoming, later = at(idx), at(idx + 1), at(idx + 2)
     result = {
         "now_title": current[2],
+        "now_start": current[0],
         "now_stop": current[1],
         "next_title": upcoming[2] if upcoming else None,
         "next_start": upcoming[0] if upcoming else None,
@@ -238,8 +239,10 @@ def render_bumper(
     audio_path: str | None,
     out_path: str,
     cpu_limit_percent: int = 0,
+    fade: bool = True,
 ):
     """
+    fade: fade the text in over the first 0.5s and out over the last 0.5s.
     background: { "path": str, "type": "image" | "gif" | "video" }
     shapes: list of dicts, each a rectangle:
       { "x_pct": float, "y_pct": float, "width_pct": float, "height_pct": float,
@@ -278,6 +281,7 @@ def render_bumper(
         text = _escape_drawtext(f["text"])
         fontfile_arg = f":fontfile='{font_path}'" if font_path and os.path.exists(font_path) else ""
         alpha_expr = f"if(lt(t\\,0.5)\\,t/0.5\\,if(gt(t\\,{duration_seconds-0.5})\\,({duration_seconds}-t)/0.5\\,1))"
+        alpha_arg = f":alpha='{alpha_expr}'" if fade else ""
 
         extra = ""
         outline_width = f.get("outline_width", 0)
@@ -295,7 +299,7 @@ def render_bumper(
 
         filters.append(
             f"drawtext=text='{text}'{fontfile_arg}:fontcolor=0x{color}:fontsize={size}"
-            f":x={x}:y={y}:alpha='{alpha_expr}'{extra}"
+            f":x={x}:y={y}{alpha_arg}{extra}"
         )
 
     vf = ",".join(filters)
@@ -339,6 +343,7 @@ def mix_audio(
     duration_seconds: float,
     out_path: str,
     cpu_limit_percent: int = 0,
+    fade: bool = True,
 ) -> str | None:
     """
     Combines optional narration and optional looped background music into a single
@@ -351,6 +356,8 @@ def mix_audio(
     if narration_path and not music_path:
         return narration_path
 
+    fade_start = max(duration_seconds - 0.75, 0)
+
     timeout = 60
     if cpu_limit_percent and cpu_limit_percent > 0:
         timeout = min(int(60 * max(1, 100 / cpu_limit_percent)), 600)
@@ -359,7 +366,7 @@ def mix_audio(
         cmd = [
             "ffmpeg", "-y", "-stream_loop", "-1", "-i", music_path,
             "-t", str(duration_seconds),
-            "-af", f"afade=t=out:st={max(duration_seconds - 0.75, 0)}:d=0.75,volume=0.6",
+            "-af", (f"afade=t=out:st={fade_start}:d=0.75," if fade else "") + "volume=0.6",
             "-c:a", "aac", out_path,
         ]
         proc = _run_ffmpeg(cmd, cpu_limit_percent=cpu_limit_percent, timeout=timeout)
@@ -373,7 +380,7 @@ def mix_audio(
         "-i", narration_path,
         "-stream_loop", "-1", "-i", music_path,
         "-filter_complex",
-        f"[1:a]volume=0.25,afade=t=out:st={max(duration_seconds - 0.75, 0)}:d=0.75[m];"
+        "[1:a]volume=0.25" + (f",afade=t=out:st={fade_start}:d=0.75" if fade else "") + "[m];"
         f"[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[aout]",
         "-map", "[aout]", "-t", str(duration_seconds),
         "-c:a", "aac", out_path,

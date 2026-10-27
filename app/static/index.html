@@ -96,9 +96,8 @@
 
         <fieldset>
           <legend>Text line 1</legend>
-          <label>Shows <select id="nw-source"><option value="current">Current show (the one that just ended)</option><option value="next" selected>Next show</option><option value="after_next">Show after next</option></select></label>
-          <label>Prefix <input id="nw-prefix" value="UP NEXT"></label>
-          <label><input type="checkbox" id="nw-time"> Add start time (e.g. "AT 9:00 PM")</label>
+          <label>{show} and {time} mean <select id="nw-source"><option value="current">the current show (the one that just ended)</option><option value="next" selected>the next show</option><option value="after_next">the show after next</option></select></label>
+          <label>Text <input id="nw-template" value="UP NEXT: {show}"></label>
           <label>Color <input type="color" id="nw-color" value="#ffd400"></label>
           <label>Font size <input type="number" id="nw-size" value="52"></label>
           <label>Outline width (0 = none) <input type="number" id="nw-outline-width" value="0" min="0"></label>
@@ -111,9 +110,8 @@
 
         <fieldset>
           <legend>Text line 2</legend>
-          <label>Shows <select id="un-source"><option value="current">Current show (the one that just ended)</option><option value="next">Next show</option><option value="after_next" selected>Show after next</option></select></label>
-          <label>Prefix <input id="un-prefix" value="FOLLOWED BY"></label>
-          <label><input type="checkbox" id="un-time"> Add start time (e.g. "AT 9:00 PM")</label>
+          <label>{show} and {time} mean <select id="un-source"><option value="current">the current show (the one that just ended)</option><option value="next">the next show</option><option value="after_next" selected>the show after next</option></select></label>
+          <label>Text <input id="un-template" value="FOLLOWED BY: {show}"></label>
           <label>Color <input type="color" id="un-color" value="#ffffff"></label>
           <label>Font size <input type="number" id="un-size" value="40"></label>
           <label>Outline width (0 = none) <input type="number" id="un-outline-width" value="0" min="0"></label>
@@ -123,12 +121,18 @@
           <label>Shadow offset X <input type="number" id="un-shadow-x" value="2"></label>
           <label>Shadow offset Y <input type="number" id="un-shadow-y" value="2"></label>
         </fieldset>
+        <p class="hint">Text placeholders: <code>{show}</code> and <code>{time}</code> (the show picked
+          above and its start time), or name one directly: <code>{current}</code>, <code>{next}</code>,
+          <code>{later}</code> (the show after next), <code>{current_time}</code>, <code>{next_time}</code>,
+          <code>{later_time}</code>. Example: <code>UP NEXT: {next} AT {next_time}</code>.
+          A line that names a show the guide doesn't have yet is left off.</p>
 
         <fieldset>
           <legend>Timing & voice</legend>
           <label>Regenerate every (minutes) <input type="number" id="f-interval" value="10" min="1"></label>
           <label>Clip length (seconds) <input type="number" id="f-duration" value="6" min="2"></label>
           <label>Resolution <input id="f-resolution" value="1920x1080"></label>
+          <label><input type="checkbox" id="f-fade" checked> Fade text and music in/out</label>
           <label><input type="checkbox" id="f-tts"> Voice narration (requires a Piper voice model)</label>
           <label>Piper voice model path <input id="f-voice" placeholder="/data/uploads/voices/en_US-lessac-medium.onnx"></label>
           <p class="hint">Download a voice's .onnx + .onnx.json pair from the Piper voices repo and place both
