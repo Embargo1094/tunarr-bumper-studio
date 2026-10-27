@@ -33,10 +33,12 @@ for d in (CONFIG_DIR, UPLOAD_DIR, OUTPUT_DIR, WORK_DIR, PREVIEW_DIR):
 # Only one bumper renders at a time across the whole app, so the CPU limit
 # holds no matter how many channels are due at once.
 RENDER_LOCK = threading.Lock()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bumper-studio")
 
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 CHANNELS_FILE = CONFIG_DIR / "channels.json"
+ROTATION_FILE = CONFIG_DIR / "rotation.json"
 
 app = FastAPI(title="Tunarr Bumper Studio")
 scheduler = BackgroundScheduler()
@@ -118,6 +120,29 @@ def _remove_output_folder(folder: Path):
             shutil.rmtree(folder)
     except Exception as e:
         log.warning("Couldn't remove old output folder %s: %s", folder, e)
+
+
+def pick_rotating(channel_id: str, pool_name: str, paths: list[str]) -> str | None:
+    """Shuffle-bag pick: goes through every item in a random order before any
+    repeats, and never picks the same item twice in a row. State is kept in
+    rotation.json so it survives restarts. Callers hold RENDER_LOCK."""
+    if not paths:
+        return None
+    if len(paths) == 1:
+        return paths[0]
+    state = load_json(ROTATION_FILE, {})
+    entry = state.setdefault(channel_id, {}).setdefault(pool_name, {"queue": [], "last": None})
+    queue = [p for p in entry.get("queue", []) if p in paths]
+    if not queue:
+        queue = paths[:]
+        random.shuffle(queue)
+        if queue[0] == entry.get("last"):
+            swap = random.randrange(1, len(queue))
+            queue[0], queue[swap] = queue[swap], queue[0]
+    choice = queue.pop(0)
+    entry["queue"], entry["last"] = queue, choice
+    save_json(ROTATION_FILE, state)
+    return choice
 
 
 def get_channel_or_404(channel_id: str):
@@ -379,7 +404,10 @@ def _render_channel(channel: dict, use_placeholder: bool = False):
             narration_path = tmp_wav
 
     music_tracks = channel.get("music_tracks") or []
-    music_path = random.choice(music_tracks)["path"] if music_tracks else None
+    music_paths = [m["path"] for m in music_tracks if m.get("path") and os.path.exists(m["path"])]
+    # Previews pick at random so they don't use up the live channel's rotation.
+    pick = (lambda _cid, _pool, paths: random.choice(paths) if paths else None) if use_placeholder else pick_rotating
+    music_path = pick(channel["id"], "music", music_paths)
 
     audio_path = None
     if narration_path or music_path:
@@ -396,7 +424,14 @@ def _render_channel(channel: dict, use_placeholder: bool = False):
     valid_backgrounds = [b for b in backgrounds if b.get("path") and os.path.exists(b["path"])]
     if not valid_backgrounds:
         raise RuntimeError("No background image/gif/video configured for this channel.")
-    background = random.choice(valid_backgrounds)
+    bg_path = pick(channel["id"], "backgrounds", [b["path"] for b in valid_backgrounds])
+    background = next(b for b in valid_backgrounds if b["path"] == bg_path)
+    log.info(
+        "Rendering %s for '%s': background %s, music %s",
+        "preview" if use_placeholder else "bumper", channel.get("name"),
+        background.get("name") or os.path.basename(bg_path),
+        os.path.basename(music_path) if music_path else "none",
+    )
 
     try:
         engine.render_bumper(
