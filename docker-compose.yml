@@ -3,6 +3,9 @@ services:
     image: ghcr.io/embargo1094/tunarr-bumper-studio:latest
     container_name: tunarr-bumper-studio
     restart: unless-stopped
+    environment:
+      # Times on bumpers ("AT 9:00 PM") use this timezone
+      - TZ=America/New_York
     ports:
       - "8420:8420"
     volumes:

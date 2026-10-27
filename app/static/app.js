@@ -122,7 +122,9 @@ function clearEditorForm() {
   $("f-voice").value = "";
   $("f-enabled").checked = true;
 
-  $("nw-prefix").value = "YOU'RE WATCHING";
+  $("nw-source").value = "next";
+  $("nw-prefix").value = "UP NEXT";
+  $("nw-time").checked = false;
   $("nw-color").value = "#ffd400";
   $("nw-size").value = 52;
   $("nw-outline-width").value = 0;
@@ -132,7 +134,9 @@ function clearEditorForm() {
   $("nw-shadow-x").value = 2;
   $("nw-shadow-y").value = 2;
 
-  $("un-prefix").value = "UP NEXT";
+  $("un-source").value = "after_next";
+  $("un-prefix").value = "FOLLOWED BY";
+  $("un-time").checked = false;
   $("un-color").value = "#ffffff";
   $("un-size").value = 40;
   $("un-outline-width").value = 0;
@@ -170,7 +174,9 @@ function fillEditorForm(c) {
   $("f-enabled").checked = !!c.enabled;
 
   const nw = c.now_watching || {};
-  $("nw-prefix").value = nw.prefix || "YOU'RE WATCHING";
+  $("nw-source").value = nw.source || "current";
+  $("nw-prefix").value = nw.prefix ?? "YOU'RE WATCHING";
+  $("nw-time").checked = nw.show_time ?? false;
   $("nw-color").value = nw.color || "#ffd400";
   $("nw-size").value = nw.font_size || 52;
   $("nw-outline-width").value = nw.outline_width || 0;
@@ -181,7 +187,9 @@ function fillEditorForm(c) {
   $("nw-shadow-y").value = nw.shadow_y ?? 2;
 
   const un = c.up_next || {};
-  $("un-prefix").value = un.prefix || "UP NEXT";
+  $("un-source").value = un.source || "next";
+  $("un-prefix").value = un.prefix ?? "UP NEXT";
+  $("un-time").checked = un.show_time ?? true;
   $("un-color").value = un.color || "#ffffff";
   $("un-size").value = un.font_size || 40;
   $("un-outline-width").value = un.outline_width || 0;
@@ -378,7 +386,7 @@ function drawCanvas() {
     ctx.fillRect(x, y, w, h);
   });
 
-  drawLabel("now_watching", `${$("nw-prefix").value}: Example Show`, $("nw-color").value,
+  drawLabel("now_watching", previewText("nw"), $("nw-color").value,
     parseInt($("nw-size").value || 52) / 2, {
       outlineWidth: parseInt($("nw-outline-width").value || 0),
       outlineColor: $("nw-outline-color").value,
@@ -387,7 +395,7 @@ function drawCanvas() {
       shadowX: parseInt($("nw-shadow-x").value || 0),
       shadowY: parseInt($("nw-shadow-y").value || 0),
     });
-  drawLabel("up_next", `${$("un-prefix").value}: Next Example Show AT 8:30 PM`, $("un-color").value,
+  drawLabel("up_next", previewText("un"), $("un-color").value,
     parseInt($("un-size").value || 40) / 2, {
       outlineWidth: parseInt($("un-outline-width").value || 0),
       outlineColor: $("un-outline-color").value,
@@ -396,6 +404,19 @@ function drawCanvas() {
       shadowX: parseInt($("un-shadow-x").value || 0),
       shadowY: parseInt($("un-shadow-y").value || 0),
     });
+}
+const PREVIEW_SHOWS = {
+  current: ["Example Show", ""],
+  next: ["Next Example Show", "8:30 PM"],
+  after_next: ["Later Example Show", "9:00 PM"],
+};
+function previewText(pfx) {
+  const source = $(`${pfx}-source`).value;
+  const [title, time] = PREVIEW_SHOWS[source] || PREVIEW_SHOWS.next;
+  const prefix = $(`${pfx}-prefix`).value.trim();
+  let text = prefix ? `${prefix}: ${title}` : title;
+  if ($(`${pfx}-time`).checked && source !== "current") text += ` AT ${time}`;
+  return text;
 }
 function hexToRgba(hex, alpha) {
   const h = hex.replace("#", "");
@@ -448,9 +469,9 @@ window.addEventListener("mouseup", () => { state.dragTarget = null; });
 
 // redraw live as text/style options change
 [
-  "nw-prefix", "nw-color", "nw-size", "nw-outline-width", "nw-outline-color",
+  "nw-source", "nw-time", "nw-prefix", "nw-color", "nw-size", "nw-outline-width", "nw-outline-color",
   "nw-shadow", "nw-shadow-color", "nw-shadow-x", "nw-shadow-y",
-  "un-prefix", "un-color", "un-size", "un-outline-width", "un-outline-color",
+  "un-source", "un-time", "un-prefix", "un-color", "un-size", "un-outline-width", "un-outline-color",
   "un-shadow", "un-shadow-color", "un-shadow-x", "un-shadow-y",
 ].forEach(id => {
   $(id).addEventListener("input", drawCanvas);
@@ -478,6 +499,7 @@ function collectPayload() {
     shapes: state.shapes,
     font_path: state.uploadedFont ? state.uploadedFont.path : "",
     now_watching: {
+      source: $("nw-source").value, show_time: $("nw-time").checked,
       prefix: $("nw-prefix").value, color: $("nw-color").value,
       font_size: parseInt($("nw-size").value), x_pct: state.fields.now_watching.x_pct,
       y_pct: state.fields.now_watching.y_pct,
@@ -489,6 +511,7 @@ function collectPayload() {
       shadow_y: parseInt($("nw-shadow-y").value) || 0,
     },
     up_next: {
+      source: $("un-source").value, show_time: $("un-time").checked,
       prefix: $("un-prefix").value, color: $("un-color").value,
       font_size: parseInt($("un-size").value), x_pct: state.fields.up_next.x_pct,
       y_pct: state.fields.up_next.y_pct,

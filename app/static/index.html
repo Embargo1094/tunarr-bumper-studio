@@ -95,8 +95,10 @@
         </fieldset>
 
         <fieldset>
-          <legend>"You're Watching" text</legend>
-          <label>Prefix <input id="nw-prefix" value="YOU'RE WATCHING"></label>
+          <legend>Text line 1</legend>
+          <label>Shows <select id="nw-source"><option value="current">Current show (the one that just ended)</option><option value="next" selected>Next show</option><option value="after_next">Show after next</option></select></label>
+          <label>Prefix <input id="nw-prefix" value="UP NEXT"></label>
+          <label><input type="checkbox" id="nw-time"> Add start time (e.g. "AT 9:00 PM")</label>
           <label>Color <input type="color" id="nw-color" value="#ffd400"></label>
           <label>Font size <input type="number" id="nw-size" value="52"></label>
           <label>Outline width (0 = none) <input type="number" id="nw-outline-width" value="0" min="0"></label>
@@ -108,8 +110,10 @@
         </fieldset>
 
         <fieldset>
-          <legend>"Up Next" text</legend>
-          <label>Prefix <input id="un-prefix" value="UP NEXT"></label>
+          <legend>Text line 2</legend>
+          <label>Shows <select id="un-source"><option value="current">Current show (the one that just ended)</option><option value="next">Next show</option><option value="after_next" selected>Show after next</option></select></label>
+          <label>Prefix <input id="un-prefix" value="FOLLOWED BY"></label>
+          <label><input type="checkbox" id="un-time"> Add start time (e.g. "AT 9:00 PM")</label>
           <label>Color <input type="color" id="un-color" value="#ffffff"></label>
           <label>Font size <input type="number" id="un-size" value="40"></label>
           <label>Outline width (0 = none) <input type="number" id="un-outline-width" value="0" min="0"></label>

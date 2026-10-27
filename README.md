@@ -114,6 +114,17 @@ on your regeneration interval (not continuously), a lower limit just makes
 each individual render take longer — it doesn't affect anything else about
 how often bumpers update.
 
+## Text lines
+
+Each bumper has two text lines. For each one you choose which show it names
+(the current show, the next show, or the show after next), its prefix, and
+whether to add the start time. New profiles default to "UP NEXT: <next show>"
+and "FOLLOWED BY: <show after next>", which suits bumpers that play after each
+episode. Narration reads the same lines that are on screen. If there's no show
+after next in the guide yet, that line is left off.
+
+Start times use the `TZ` setting in the stack (default `America/New_York`).
+
 ## Multiple channels
 
 Each channel profile writes its own file, named after the profile:

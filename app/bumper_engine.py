@@ -136,35 +136,30 @@ def fetch_now_next(
     shows = [p for p in programmes if _is_show(p)] or programmes
     shows.sort(key=lambda p: p[0])
 
-    current = None
-    upcoming = None
-    for i, (start, stop, title) in enumerate(shows):
-        if start <= now < stop:
-            current = (start, stop, title)
-            if i + 1 < len(shows):
-                upcoming = shows[i + 1]
-            break
-
-    if current is None:
-        # Between shows (e.g. this bumper is playing as post-roll filler right now):
-        # "now" is the show that just ended, "next" is the next one to start.
-        past = [p for p in shows if p[1] <= now]
-        future = [p for p in shows if p[0] > now]
+    # Find the current show plus the two after it. Between shows (e.g. while this
+    # bumper plays as post-roll filler), "current" is the show that just ended.
+    idx = next((k for k, (start, stop, _t) in enumerate(shows) if start <= now < stop), None)
+    if idx is None:
+        past = [k for k, p in enumerate(shows) if p[1] <= now]
+        future = [k for k, p in enumerate(shows) if p[0] > now]
         if past:
-            current = past[-1]
-            upcoming = future[0] if future else None
+            idx = past[-1]
         elif future:
-            current = future[0]
-            upcoming = future[1] if len(future) > 1 else None
+            idx = future[0]
         else:
-            current = shows[-1]
-            upcoming = None
+            idx = len(shows) - 1
 
+    def at(k):
+        return shows[k] if 0 <= k < len(shows) else None
+
+    current, upcoming, later = at(idx), at(idx + 1), at(idx + 2)
     result = {
         "now_title": current[2],
         "now_stop": current[1],
         "next_title": upcoming[2] if upcoming else None,
         "next_start": upcoming[0] if upcoming else None,
+        "later_title": later[2] if later else None,
+        "later_start": later[0] if later else None,
     }
     return result
 

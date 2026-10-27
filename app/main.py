@@ -50,12 +50,14 @@ DEFAULT_SETTINGS = {
 
 DEFAULT_FIELDS = {
     "now_watching": {
-        "prefix": "YOU'RE WATCHING", "x_pct": 8, "y_pct": 68, "font_size": 52, "color": "#FFD400",
+        "prefix": "UP NEXT", "source": "next", "show_time": False,
+        "x_pct": 8, "y_pct": 68, "font_size": 52, "color": "#FFD400",
         "outline_width": 0, "outline_color": "#000000",
         "shadow_enabled": True, "shadow_color": "#000000", "shadow_x": 2, "shadow_y": 2,
     },
     "up_next": {
-        "prefix": "UP NEXT", "x_pct": 8, "y_pct": 80, "font_size": 40, "color": "#FFFFFF",
+        "prefix": "FOLLOWED BY", "source": "after_next", "show_time": False,
+        "x_pct": 8, "y_pct": 80, "font_size": 40, "color": "#FFFFFF",
         "outline_width": 0, "outline_color": "#000000",
         "shadow_enabled": True, "shadow_color": "#000000", "shadow_x": 2, "shadow_y": 2,
     },
@@ -340,32 +342,59 @@ def api_tunarr_media_sources():
 # generation
 # ---------------------------------------------------------------------------
 
-def _build_fields(channel: dict, now_title: str, next_title: str, next_time: str):
-    fields = []
-    nw = channel.get("now_watching") or DEFAULT_FIELDS["now_watching"]
-    nw_prefix = nw.get("prefix", "YOU'RE WATCHING")
-    fields.append({
-        "text": f"{nw_prefix}: {now_title}",
-        "x_pct": nw.get("x_pct", 8), "y_pct": nw.get("y_pct", 68),
-        "font_size": nw.get("font_size", 52), "color": nw.get("color", "#FFD400"),
-        "outline_width": nw.get("outline_width", 0), "outline_color": nw.get("outline_color", "#000000"),
-        "shadow_enabled": nw.get("shadow_enabled", True), "shadow_color": nw.get("shadow_color", "#000000"),
-        "shadow_x": nw.get("shadow_x", 2), "shadow_y": nw.get("shadow_y", 2),
-    })
-    if next_title:
-        un = channel.get("up_next") or DEFAULT_FIELDS["up_next"]
-        text = f"{un.get('prefix', 'UP NEXT')}: {next_title}"
-        if next_time:
-            text += f" AT {next_time}"
-        fields.append({
-            "text": text,
-            "x_pct": un.get("x_pct", 8), "y_pct": un.get("y_pct", 80),
-            "font_size": un.get("font_size", 40), "color": un.get("color", "#FFFFFF"),
-            "outline_width": un.get("outline_width", 0), "outline_color": un.get("outline_color", "#000000"),
-            "shadow_enabled": un.get("shadow_enabled", True), "shadow_color": un.get("shadow_color", "#000000"),
-            "shadow_x": un.get("shadow_x", 2), "shadow_y": un.get("shadow_y", 2),
+# Which show each text line names. Profiles saved before this option existed
+# keep their old behavior: line 1 = current show, line 2 = next show + time.
+LEGACY_LINE_DEFAULTS = {
+    "now_watching": {"source": "current", "show_time": False},
+    "up_next": {"source": "next", "show_time": True},
+}
+
+
+def _line_settings(channel: dict, key: str) -> dict:
+    line = dict(channel.get(key) or DEFAULT_FIELDS[key])
+    for k, v in LEGACY_LINE_DEFAULTS[key].items():
+        line.setdefault(k, v)
+    return line
+
+
+def _build_lines(channel: dict, shows: dict) -> list[dict]:
+    """shows: {"current": (title, time), "next": (title, time), "after_next": (title, time)}
+    Returns one entry per text line that has a show to name."""
+    lines = []
+    for key in ("now_watching", "up_next"):
+        line = _line_settings(channel, key)
+        title, start = shows.get(line["source"]) or (None, "")
+        if not title:
+            continue
+        prefix = (line.get("prefix") or "").strip()
+        text = f"{prefix}: {title}" if prefix else title
+        if line.get("show_time") and start and line["source"] != "current":
+            text += f" AT {start}"
+        lines.append({
+            "text": text, "prefix": prefix, "title": title,
+            "start": start if line.get("show_time") and line["source"] != "current" else "",
+            "x_pct": line.get("x_pct", 8), "y_pct": line.get("y_pct", 68 if key == "now_watching" else 80),
+            "font_size": line.get("font_size", 52 if key == "now_watching" else 40),
+            "color": line.get("color", "#FFFFFF"),
+            "outline_width": line.get("outline_width", 0), "outline_color": line.get("outline_color", "#000000"),
+            "shadow_enabled": line.get("shadow_enabled", True), "shadow_color": line.get("shadow_color", "#000000"),
+            "shadow_x": line.get("shadow_x", 2), "shadow_y": line.get("shadow_y", 2),
         })
-    return fields
+    return lines
+
+
+def _narration_for(lines: list[dict]) -> str:
+    """Speaks the same lines that are on screen, e.g.
+    "Up next, The Outer Limits. Followed by, The Twilight Zone, at 9:00 PM." """
+    parts = []
+    for line in lines:
+        prefix = line["prefix"].rstrip(":").strip()
+        spoken = (prefix[:1].upper() + prefix[1:].lower() + ", ") if prefix else ""
+        sentence = f"{spoken}{line['title']}"
+        if line["start"]:
+            sentence += f", at {line['start']}"
+        parts.append(sentence + ".")
+    return " ".join(parts)
 
 
 def generate_for_channel(channel: dict, use_placeholder: bool = False):
@@ -379,26 +408,31 @@ def _render_channel(channel: dict, use_placeholder: bool = False):
     settings = get_settings()
 
     if use_placeholder:
-        now_title, next_title, next_time = "Example Show", "Next Example Show", "8:30 PM"
+        shows = {
+            "current": ("Example Show", ""),
+            "next": ("Next Example Show", "8:30 PM"),
+            "after_next": ("Later Example Show", "9:00 PM"),
+        }
     else:
         info = engine.fetch_now_next(
             settings["tunarr_base_url"], channel["tunarr_channel_id"],
             channel_number=channel.get("tunarr_channel_number", ""),
             channel_name=channel.get("tunarr_channel_name", ""),
         )
-        now_title = info["now_title"]
-        next_title = info["next_title"]
-        next_time = engine.format_next_time(info["next_start"]) if info["next_start"] else ""
+        fmt = lambda dt: engine.format_next_time(dt) if dt else ""
+        shows = {
+            "current": (info["now_title"], ""),
+            "next": (info["next_title"], fmt(info["next_start"])),
+            "after_next": (info.get("later_title"), fmt(info.get("later_start"))),
+        }
 
-    fields = _build_fields(channel, now_title, next_title, next_time)
+    fields = _build_lines(channel, shows)
     duration = channel.get("duration_seconds", 6.0)
     cpu_limit_percent = settings.get("cpu_limit_percent", 0)
 
     narration_path = None
-    if channel.get("tts_enabled"):
-        narration = f"You're watching {now_title}."
-        if next_title:
-            narration += f" Up next, {next_title}" + (f", at {next_time}." if next_time else ".")
+    if channel.get("tts_enabled") and fields:
+        narration = _narration_for(fields)
         tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
         if engine.generate_tts(narration, channel.get("tts_voice", ""), tmp_wav):
             narration_path = tmp_wav
