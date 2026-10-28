@@ -644,4 +644,15 @@ def on_startup():
         _schedule_channel(c, run_now=moved or not output_path_for(c, channels).exists())
 
 
+@app.middleware("http")
+async def always_revalidate_frontend(request, call_next):
+    """Make browsers check for a newer page/script on every load (a 304 if
+    nothing changed). Without this, a browser can keep an old app.js after an
+    update; it then crashes against the new page and the editor looks empty."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
