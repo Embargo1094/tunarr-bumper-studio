@@ -200,16 +200,6 @@ def generate_tts(text: str, voice: str, out_wav_path: str) -> bool:
 # ffmpeg rendering
 # ---------------------------------------------------------------------------
 
-def _escape_drawtext(text: str) -> str:
-    # ffmpeg drawtext needs backslash, colon, single-quote and percent escaped.
-    # Order matters: backslash first, then the rest.
-    text = text.replace("\\", "\\\\")
-    text = text.replace(":", "\\:")
-    text = text.replace("%", "\\%")
-    text = text.replace("'", "\u2019")  # swap to a typographic apostrophe, which drawtext handles cleanly
-    return text
-
-
 def _run_ffmpeg(cmd: list, cpu_limit_percent: int = 0, timeout: int = 180):
     """
     Runs an ffmpeg (or related) command, optionally hard-capped to a percentage of one CPU
@@ -229,6 +219,83 @@ def _run_ffmpeg(cmd: list, cpu_limit_percent: int = 0, timeout: int = 180):
         raise
 
 
+DEFAULT_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+TEXT_FADE_SECONDS = 0.5
+
+
+def _hex_rgba(color: str, alpha: float = 1.0) -> tuple:
+    h = (color or "#FFFFFF").lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        r, g, b = 255, 255, 255
+    return (r, g, b, int(round(255 * alpha)))
+
+
+def make_text_image(f: dict, font_path: str, out_png: str) -> dict:
+    """Draws one text element (shadow, outline, letter spacing) onto a transparent
+    PNG cropped to its pixels. Returns where the PNG goes relative to the text's
+    pen origin: {"dx", "dy"} (top-left of the PNG minus the origin), the top of
+    the letters ("ink_top", relative to the origin) and "advance" (text width
+    used for alignment)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    path = font_path if font_path and os.path.exists(font_path) else DEFAULT_FONT
+    size = max(1, int(f.get("font_size", 42)))
+    font = ImageFont.truetype(path, size)
+    text = f["text"]
+    spacing = float(f.get("letter_spacing") or 0)
+    outline = max(0, int(f.get("outline_width") or 0))
+    shadow = bool(f.get("shadow_enabled"))
+    sx, sy = (int(f.get("shadow_x", 2)), int(f.get("shadow_y", 2))) if shadow else (0, 0)
+
+    # Pen x position of every character. No extra spacing: draw the run as one
+    # string so the font's kerning is kept.
+    if spacing:
+        xs = [font.getlength(text[:k]) + k * spacing for k in range(len(text))]
+        advance = font.getlength(text) + spacing * max(0, len(text) - 1)
+    else:
+        xs, advance = None, font.getlength(text)
+
+    ascent, descent = font.getmetrics()
+    pad = outline + max(abs(sx), abs(sy)) + 4
+    w = int(advance + 2 * pad + abs(sx)) + 2
+    h = int(ascent + descent + 2 * pad + abs(sy)) + 2
+    ox, oy = pad + max(0, -sx), pad + max(0, -sy) + ascent   # pen origin (left, baseline)
+
+    def draw_run(draw, x0, y0, fill, stroke=0, stroke_fill=None):
+        kw = {"font": font, "fill": fill, "anchor": "ls"}
+        if stroke:
+            kw.update(stroke_width=stroke, stroke_fill=stroke_fill)
+        if xs is None:
+            draw.text((x0, y0), text, **kw)
+        else:
+            for ch, x in zip(text, xs):
+                draw.text((x0 + x, y0), ch, **kw)
+
+    main = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw_run(ImageDraw.Draw(main), ox, oy, _hex_rgba(f.get("color", "#FFFFFF")),
+             outline, _hex_rgba(f.get("outline_color", "#000000")))
+    # Top of the letters themselves (not the outline), so Y means the same as before.
+    ink = Image.new("L", (w, h), 0)
+    draw_run(ImageDraw.Draw(ink), ox, oy, 255)
+    ink_box = ink.getbbox()
+    ink_top = (ink_box[1] if ink_box else oy - ascent) - oy
+
+    if shadow:
+        layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw_run(ImageDraw.Draw(layer), ox + sx, oy + sy, _hex_rgba(f.get("shadow_color", "#000000"), 0.7),
+                 outline, _hex_rgba(f.get("shadow_color", "#000000"), 0.7))
+        layer.alpha_composite(main)
+        main = layer
+
+    box = main.getbbox() or (0, 0, 1, 1)
+    main.crop(box).save(out_png)
+    return {"dx": box[0] - ox, "dy": box[1] - oy, "ink_top": ink_top, "advance": advance}
+
+
 def render_bumper(
     background: dict,
     resolution: str,
@@ -242,77 +309,32 @@ def render_bumper(
     fade: bool = True,
 ):
     """
-    fade: fade the text in over the first 0.5s and out over the last 0.5s.
     background: { "path": str, "type": "image" | "gif" | "video" }
-    shapes: list of dicts, each a rectangle:
-      { "x_pct": float, "y_pct": float, "width_pct": float, "height_pct": float,
-        "color": "#RRGGBB", "opacity": float (0-1) }
-    fields: list of dicts, each:
-      { "text": str, "x_pct": float, "y_pct": float, "align": "left"|"center"|"right",
-        "font_size": int, "color": "#RRGGBB",
-        "outline_width": int (0 = none), "outline_color": "#RRGGBB",
-        "shadow_enabled": bool, "shadow_color": "#RRGGBB", "shadow_x": int, "shadow_y": int }
-    cpu_limit_percent: 0 = unlimited; otherwise caps ffmpeg to that % of one CPU core
-      (e.g. 50 = half a core), trading render speed for lower system impact.
+    shapes: rectangles { x_pct, y_pct, width_pct, height_pct, color "#RRGGBB", opacity 0-1 }
+    fields: text elements {
+        "text", "x_pct", "y_pct", "align": "left"|"center"|"right", "font_size", "color",
+        "outline_width", "outline_color", "shadow_enabled", "shadow_color", "shadow_x", "shadow_y",
+        "letter_spacing": px between letters,
+        "start", "end": seconds the element is on screen (default: the whole clip),
+        "fade_in", "fade_out": seconds to fade at those edges (0 = hard cut) }
+      X is where the left edge / middle / right edge of the text sits; Y is the top of the letters.
+    fade: also fade elements in at the very start and out at the very end of the clip.
     """
     width, height = (resolution.split("x") + ["1920", "1080"])[:2]
     width, height = int(width), int(height)
+    duration = float(duration_seconds)
     bg_type = background.get("type", "image")
 
-    filters = [f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"]
+    base = [f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"]
     if bg_type == "gif":
-        filters.append("loop=loop=-1:size=32767")
-
+        base.append("loop=loop=-1:size=32767")
     for shape in shapes or []:
         x = int(shape.get("x_pct", 0) / 100 * width)
         y = int(shape.get("y_pct", 80) / 100 * height)
         w = int(shape.get("width_pct", 100) / 100 * width)
         h = int(shape.get("height_pct", 20) / 100 * height)
         color = shape.get("color", "#000000").lstrip("#")
-        opacity = shape.get("opacity", 0.6)
-        filters.append(f"drawbox=x={x}:y={y}:w={w}:h={h}:color=0x{color}@{opacity}:t=fill")
-
-    for f in fields:
-        if not f.get("text"):
-            continue
-        anchor_x = int(f.get("x_pct", 10) / 100 * width)
-        y = int(f.get("y_pct", 70) / 100 * height)
-        # x_pct is where the text's left edge, center, or right edge sits, so
-        # centered text stays centered whatever the length of the show name.
-        align = f.get("align", "left")
-        if align == "center":
-            x = f"{anchor_x}-text_w/2"
-        elif align == "right":
-            x = f"{anchor_x}-text_w"
-        else:
-            x = str(anchor_x)
-        size = int(f.get("font_size", 42))
-        color = f.get("color", "#FFFFFF").lstrip("#")
-        text = _escape_drawtext(f["text"])
-        fontfile_arg = f":fontfile='{font_path}'" if font_path and os.path.exists(font_path) else ""
-        alpha_expr = f"if(lt(t\\,0.5)\\,t/0.5\\,if(gt(t\\,{duration_seconds-0.5})\\,({duration_seconds}-t)/0.5\\,1))"
-        alpha_arg = f":alpha='{alpha_expr}'" if fade else ""
-
-        extra = ""
-        outline_width = f.get("outline_width", 0)
-        if outline_width:
-            outline_color = f.get("outline_color", "#000000").lstrip("#")
-            extra += f":borderw={int(outline_width)}:bordercolor=0x{outline_color}"
-        if f.get("shadow_enabled"):
-            shadow_color = f.get("shadow_color", "#000000").lstrip("#")
-            shadow_x = f.get("shadow_x", 2)
-            shadow_y = f.get("shadow_y", 2)
-            extra += f":shadowcolor=0x{shadow_color}@0.7:shadowx={int(shadow_x)}:shadowy={int(shadow_y)}"
-        elif not outline_width:
-            # sane default so text stays legible even with no explicit styling
-            extra += ":shadowcolor=black@0.6:shadowx=2:shadowy=2"
-
-        filters.append(
-            f"drawtext=text='{text}'{fontfile_arg}:fontcolor=0x{color}:fontsize={size}"
-            f":x={x}:y={y}{alpha_arg}{extra}"
-        )
-
-    vf = ",".join(filters)
+        base.append(f"drawbox=x={x}:y={y}:w={w}:h={h}:color=0x{color}@{shape.get('opacity', 0.6)}:t=fill")
 
     cmd = ["ffmpeg", "-y"]
     if bg_type in ("gif", "video"):
@@ -320,25 +342,60 @@ def render_bumper(
     else:
         cmd += ["-loop", "1", "-i", background["path"]]
 
-    if audio_path and os.path.exists(audio_path):
-        cmd += ["-i", audio_path]
+    graph = [f"[0:v]{','.join(base)}[v0]"]
+    last, n_inputs = "v0", 1
+    with tempfile.TemporaryDirectory() as tmp:
+        for k, f in enumerate(fields):
+            if not f.get("text"):
+                continue
+            start = max(0.0, float(f.get("start", 0) or 0))
+            end = min(duration, float(f.get("end", duration) if f.get("end") is not None else duration))
+            if end - start < 0.05:
+                continue
+            fade_in = float(f.get("fade_in", 0) or 0)
+            fade_out = float(f.get("fade_out", 0) or 0)
+            if fade and start <= 0:
+                fade_in = max(fade_in, TEXT_FADE_SECONDS)
+            if fade and end >= duration:
+                fade_out = max(fade_out, TEXT_FADE_SECONDS)
+            half = (end - start) / 2
+            fade_in, fade_out = min(fade_in, half), min(fade_out, half)
 
-    cmd += ["-vf", vf, "-t", str(duration_seconds), "-pix_fmt", "yuv420p"]
+            png = os.path.join(tmp, f"text_{k}.png")
+            m = make_text_image(f, font_path, png)
+            anchor_x = f.get("x_pct", 10) / 100 * width
+            align = f.get("align", "left")
+            left = anchor_x - (m["advance"] / 2 if align == "center" else m["advance"] if align == "right" else 0)
+            origin_y = f.get("y_pct", 70) / 100 * height - m["ink_top"]
+            px, py = int(round(left + m["dx"])), int(round(origin_y + m["dy"]))
 
-    if audio_path and os.path.exists(audio_path):
-        cmd += ["-c:v", "libx264", "-c:a", "aac", "-shortest"]
-    else:
-        cmd += ["-c:v", "libx264", "-an"]
+            cmd += ["-loop", "1", "-t", f"{duration:.3f}", "-i", png]
+            chain = ["format=rgba"]
+            if fade_in > 0:
+                chain.append(f"fade=t=in:st={start:.3f}:d={fade_in:.3f}:alpha=1")
+            if fade_out > 0:
+                chain.append(f"fade=t=out:st={end - fade_out:.3f}:d={fade_out:.3f}:alpha=1")
+            graph.append(f"[{n_inputs}:v]{','.join(chain)}[t{k}]")
+            graph.append(f"[{last}][t{k}]overlay=x={px}:y={py}:enable='between(t,{start:.3f},{end:.3f})'[v{k + 1}]")
+            last = f"v{k + 1}"
+            n_inputs += 1
 
-    cmd += [out_path]
+        has_audio = bool(audio_path and os.path.exists(audio_path))
+        if has_audio:
+            cmd += ["-i", audio_path]
+        graph.append(f"[{last}]format=yuv420p[vout]")
+        cmd += ["-filter_complex", ";".join(graph), "-map", "[vout]"]
+        if has_audio:
+            cmd += ["-map", f"{n_inputs}:a", "-c:a", "aac"]
+        else:
+            cmd += ["-an"]
+        cmd += ["-t", f"{duration:.3f}", "-c:v", "libx264", "-pix_fmt", "yuv420p", out_path]
 
-    # A throttled render takes proportionally longer - stretch the timeout accordingly
-    # instead of a fixed window that would kill a deliberately-slow render partway through.
-    timeout = 180
-    if cpu_limit_percent and cpu_limit_percent > 0:
-        timeout = min(int(180 * max(1, 100 / cpu_limit_percent)), 1800)
-
-    proc = _run_ffmpeg(cmd, cpu_limit_percent=cpu_limit_percent, timeout=timeout)
+        # A throttled render takes proportionally longer; stretch the timeout to match.
+        timeout = 180
+        if cpu_limit_percent and cpu_limit_percent > 0:
+            timeout = min(int(180 * max(1, 100 / cpu_limit_percent)), 1800)
+        proc = _run_ffmpeg(cmd, cpu_limit_percent=cpu_limit_percent, timeout=timeout)
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {proc.stderr.decode(errors='ignore')[-2000:]}")
 

@@ -143,6 +143,20 @@ Center, X is its middle, so centered text stays centered whatever the length
 of the show name (picking Center sets X to 50, the middle of the screen); with
 Right, X is its right edge. Y is the top of the text.
 
+**Letter spacing** adds the same gap (in pixels at the output resolution)
+between every letter of a line.
+
+**Switching text:** any text line can switch to a different text partway
+through the clip ("Switch to different text partway through"): set the text to
+switch to (placeholders work) and the second it happens at. It appears in the
+same spot and style. **Crossfade** (off by default) blends the two over half a
+second; otherwise it's a hard cut. Narration only reads the two show lines'
+main text.
+
+**Extra text** adds lines that aren't tied to a show, like a "Schedule" header.
+They have the same options as the show lines, including switching. Use the
+**Preview at** slider under the canvas to see what's on screen at any second.
+
 Start times use the `TZ` setting in the stack (default `America/New_York`).
 
 ## Multiple channels

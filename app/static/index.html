@@ -43,6 +43,8 @@
         <div id="canvas-wrap">
           <canvas id="preview-canvas" width="960" height="540"></canvas>
         </div>
+        <label class="time-row">Preview at <input type="range" id="preview-time" min="0" max="6" step="0.1" value="0">
+          <span id="preview-time-label">0.0s</span></label>
         <div class="preview-actions">
           <button id="render-preview">🔄 Render Real Preview</button>
           <button id="generate-now">▶ Generate & Push Now</button>
@@ -87,6 +89,14 @@
         </fieldset>
 
         <fieldset>
+          <legend>Extra text</legend>
+          <ul id="extra-list" class="asset-list"></ul>
+          <button id="add-extra" type="button">+ Add text</button>
+          <p class="hint">Text that isn't one of the two show lines, like a "Schedule" header. Placeholders
+            work here too. Drag it on the canvas or set X/Y.</p>
+        </fieldset>
+
+        <fieldset>
           <legend>Rectangles / bars</legend>
           <ul id="shape-list" class="asset-list"></ul>
           <button id="add-shape" type="button">+ Add Rectangle</button>
@@ -109,12 +119,21 @@
           </div>
           <label>Color <input type="color" id="nw-color" value="#ffd400"></label>
           <label>Font size <input type="number" id="nw-size" value="52"></label>
+          <label>Letter spacing (px, 0 = normal) <input type="number" id="nw-spacing" value="0" step="1"></label>
           <label>Outline width (0 = none) <input type="number" id="nw-outline-width" value="0" min="0"></label>
           <label>Outline color <input type="color" id="nw-outline-color" value="#000000"></label>
           <label><input type="checkbox" id="nw-shadow" checked> Drop shadow</label>
           <label>Shadow color <input type="color" id="nw-shadow-color" value="#000000"></label>
           <label>Shadow offset X <input type="number" id="nw-shadow-x" value="2"></label>
           <label>Shadow offset Y <input type="number" id="nw-shadow-y" value="2"></label>
+          <div class="swap-box">
+            <label class="inline"><input type="checkbox" id="nw-swap"> Switch to different text partway through</label>
+            <label>Then show <input id="nw-swap-text" placeholder="[adult swim]"></label>
+            <div class="pos-row">
+              <label>At (seconds) <input type="number" id="nw-swap-at" value="3" min="0" step="0.1"></label>
+              <label class="inline"><input type="checkbox" id="nw-swap-xfade"> Crossfade</label>
+            </div>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -132,12 +151,21 @@
           </div>
           <label>Color <input type="color" id="un-color" value="#ffffff"></label>
           <label>Font size <input type="number" id="un-size" value="40"></label>
+          <label>Letter spacing (px, 0 = normal) <input type="number" id="un-spacing" value="0" step="1"></label>
           <label>Outline width (0 = none) <input type="number" id="un-outline-width" value="0" min="0"></label>
           <label>Outline color <input type="color" id="un-outline-color" value="#000000"></label>
           <label><input type="checkbox" id="un-shadow" checked> Drop shadow</label>
           <label>Shadow color <input type="color" id="un-shadow-color" value="#000000"></label>
           <label>Shadow offset X <input type="number" id="un-shadow-x" value="2"></label>
           <label>Shadow offset Y <input type="number" id="un-shadow-y" value="2"></label>
+          <div class="swap-box">
+            <label class="inline"><input type="checkbox" id="un-swap"> Switch to different text partway through</label>
+            <label>Then show <input id="un-swap-text" placeholder="[adult swim]"></label>
+            <div class="pos-row">
+              <label>At (seconds) <input type="number" id="un-swap-at" value="3" min="0" step="0.1"></label>
+              <label class="inline"><input type="checkbox" id="un-swap-xfade"> Crossfade</label>
+            </div>
+          </div>
         </fieldset>
         <p class="hint">Text placeholders: <code>{show}</code> and <code>{time}</code> (the show picked
           above and its start time), or name one directly: <code>{current}</code>, <code>{next}</code>,

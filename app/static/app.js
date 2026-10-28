@@ -10,6 +10,8 @@ const state = {
   backgrounds: [],   // [{path, type, name}]
   music: [],         // [{path, name}]
   shapes: [],        // [{x_pct, y_pct, width_pct, height_pct, color, opacity}]
+  extras: [],        // extra text lines
+  dragItems: [],
   uploadedFont: null, // {path}
   dragTarget: null,
 };
@@ -123,27 +125,9 @@ function clearEditorForm() {
   $("f-voice").value = "";
   $("f-enabled").checked = true;
 
-  $("nw-source").value = "next";
-  $("nw-template").value = "UP NEXT: {show}";
-  $("nw-color").value = "#ffd400";
-  $("nw-size").value = 52;
-  $("nw-outline-width").value = 0;
-  $("nw-outline-color").value = "#000000";
-  $("nw-shadow").checked = true;
-  $("nw-shadow-color").value = "#000000";
-  $("nw-shadow-x").value = 2;
-  $("nw-shadow-y").value = 2;
-
-  $("un-source").value = "after_next";
-  $("un-template").value = "FOLLOWED BY: {show}";
-  $("un-color").value = "#ffffff";
-  $("un-size").value = 40;
-  $("un-outline-width").value = 0;
-  $("un-outline-color").value = "#000000";
-  $("un-shadow").checked = true;
-  $("un-shadow-color").value = "#000000";
-  $("un-shadow-x").value = 2;
-  $("un-shadow-y").value = 2;
+  setLineDom("nw", { source: "next", template: "UP NEXT: {show}", color: "#ffd400", font_size: 52 });
+  setLineDom("un", { source: "after_next", template: "FOLLOWED BY: {show}", color: "#ffffff", font_size: 40 });
+  state.extras = [];
 
   state.fields.now_watching = { x_pct: 8, y_pct: 68, align: "left" };
   state.fields.up_next = { x_pct: 8, y_pct: 80, align: "left" };
@@ -160,6 +144,8 @@ function clearEditorForm() {
   renderBackgroundList();
   renderMusicList();
   renderShapeList();
+  renderExtraList();
+  updateTimeSlider();
   drawCanvas();
 }
 
@@ -175,28 +161,12 @@ function fillEditorForm(c) {
   $("f-enabled").checked = !!c.enabled;
 
   const nw = c.now_watching || {};
-  $("nw-source").value = nw.source || "current";
-  $("nw-template").value = templateFor(nw, "YOU'RE WATCHING", false);
-  $("nw-color").value = nw.color || "#ffd400";
-  $("nw-size").value = nw.font_size || 52;
-  $("nw-outline-width").value = nw.outline_width || 0;
-  $("nw-outline-color").value = nw.outline_color || "#000000";
-  $("nw-shadow").checked = nw.shadow_enabled !== false;
-  $("nw-shadow-color").value = nw.shadow_color || "#000000";
-  $("nw-shadow-x").value = nw.shadow_x ?? 2;
-  $("nw-shadow-y").value = nw.shadow_y ?? 2;
-
+  setLineDom("nw", { ...nw, source: nw.source || "current", template: templateFor(nw, "YOU'RE WATCHING", false),
+                     color: nw.color || "#ffd400", font_size: nw.font_size || 52 });
   const un = c.up_next || {};
-  $("un-source").value = un.source || "next";
-  $("un-template").value = templateFor(un, "UP NEXT", true);
-  $("un-color").value = un.color || "#ffffff";
-  $("un-size").value = un.font_size || 40;
-  $("un-outline-width").value = un.outline_width || 0;
-  $("un-outline-color").value = un.outline_color || "#000000";
-  $("un-shadow").checked = un.shadow_enabled !== false;
-  $("un-shadow-color").value = un.shadow_color || "#000000";
-  $("un-shadow-x").value = un.shadow_x ?? 2;
-  $("un-shadow-y").value = un.shadow_y ?? 2;
+  setLineDom("un", { ...un, source: un.source || "next", template: templateFor(un, "UP NEXT", true),
+                     color: un.color || "#ffffff", font_size: un.font_size || 40 });
+  state.extras = (c.extra_texts || []).map(e => ({ ...e }));
 
   state.fields.now_watching = { x_pct: nw.x_pct ?? 8, y_pct: nw.y_pct ?? 68, align: nw.align || "left" };
   state.fields.up_next = { x_pct: un.x_pct ?? 8, y_pct: un.y_pct ?? 80, align: un.align || "left" };
@@ -219,6 +189,8 @@ function fillEditorForm(c) {
   renderBackgroundList();
   renderMusicList();
   renderShapeList();
+  renderExtraList();
+  updateTimeSlider();
   loadBackgroundPreviewImage();
   $("preview-video").classList.add("hidden");
   drawCanvas();
@@ -317,6 +289,8 @@ $("f-font-file").onchange = async (e) => {
 $("add-shape").onclick = () => {
   state.shapes.push({ x_pct: 0, y_pct: 80, width_pct: 100, height_pct: 20, color: "#000000", opacity: 0.6 });
   renderShapeList();
+  renderExtraList();
+  updateTimeSlider();
   drawCanvas();
 };
 function renderShapeList() {
@@ -386,25 +360,16 @@ function drawCanvas() {
     ctx.fillRect(x, y, w, h);
   });
 
-  drawLabel("now_watching", previewText("nw"), $("nw-color").value,
-    parseInt($("nw-size").value || 52) * previewScale(), {
-      outlineWidth: parseInt($("nw-outline-width").value || 0),
-      outlineColor: $("nw-outline-color").value,
-      shadow: $("nw-shadow").checked,
-      shadowColor: $("nw-shadow-color").value,
-      shadowX: parseInt($("nw-shadow-x").value || 0),
-      shadowY: parseInt($("nw-shadow-y").value || 0),
-    });
-  drawLabel("up_next", previewText("un"), $("un-color").value,
-    parseInt($("un-size").value || 40) * previewScale(), {
-      outlineWidth: parseInt($("un-outline-width").value || 0),
-      outlineColor: $("un-outline-color").value,
-      shadow: $("un-shadow").checked,
-      shadowColor: $("un-shadow-color").value,
-      shadowX: parseInt($("un-shadow-x").value || 0),
-      shadowY: parseInt($("un-shadow-y").value || 0),
-    });
+  // Draw every text element as it looks at the preview time; remember where
+  // each one is so it can be dragged.
+  const t = parseFloat($("preview-time").value) || 0;
+  state.dragItems = [];
+  for (const [pfx, key] of Object.entries(LINE_KEYS)) {
+    drawElement(lineFromDom(pfx), state.fields[key], t, () => syncLineControls());
+  }
+  state.extras.forEach(extra => drawElement(extra, extra, t, () => syncExtraPos(extra)));
 }
+
 const PREVIEW_VALUES = {
   current: "Example Show", current_time: "8:00 PM",
   next: "Next Example Show", next_time: "8:30 PM",
@@ -427,16 +392,17 @@ function templateFor(line, legacyPrefix, legacyTime) {
   if ((line.show_time ?? legacyTime) && source !== "current") t += " AT {time}";
   return t;
 }
-function previewText(pfx) {
-  const source = $(`${pfx}-source`).value;
-  const values = { ...PREVIEW_VALUES, show: PREVIEW_VALUES[source], time: PREVIEW_VALUES[`${source}_time`] };
-  return $(`${pfx}-template`).value.replace(/\{\s*([A-Za-z_]+)\s*\}/g, (m, name) => {
+function fillPreview(template, source) {
+  const src = source || "next";
+  const values = { ...PREVIEW_VALUES, show: PREVIEW_VALUES[src], time: PREVIEW_VALUES[`${src}_time`] };
+  return (template || "").replace(/\{\s*([A-Za-z_]+)\s*\}/g, (m, name) => {
     const key = PLACEHOLDERS[name.toLowerCase()];
     return key ? values[key] : m;
   }).replace(/\s{2,}/g, " ").trim();
 }
+function previewText(pfx) { return fillPreview($(`${pfx}-template`).value, $(`${pfx}-source`).value); }
 function hexToRgba(hex, alpha) {
-  const h = hex.replace("#", "");
+  const h = (hex || "#000000").replace("#", "");
   const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
@@ -444,38 +410,84 @@ function previewScale() {
   const w = parseInt(($("f-resolution").value || "1920x1080").split("x")[0]) || 1920;
   return canvas.width / w;
 }
-function drawLabel(key, text, color, size, style) {
-  const f = state.fields[key];
-  const x = (f.x_pct / 100) * canvas.width;
-  const y = (f.y_pct / 100) * canvas.height;
-  const align = f.align || "left";
-  ctx.font = `bold ${size}px sans-serif`;
+
+// Which text a line shows at time t (its swap text after swap_at).
+function textAt(line, t) {
+  const main = fillPreview(line.template, line.source);
+  if (line.swap_enabled && (line.swap_template || "").trim() && t >= (parseFloat(line.swap_at) || 0)) {
+    return fillPreview(line.swap_template, line.source);
+  }
+  return main;
+}
+function drawElement(line, pos, t, onDrag) {
+  const text = textAt(line, t);
+  if (!text) return;
+  const s = previewScale();
+  const size = (parseInt(line.font_size) || 40) * s;
+  const x = (pos.x_pct / 100) * canvas.width;
+  const y = (pos.y_pct / 100) * canvas.height;
+  const align = pos.align || "left";
+  ctx.font = `${size}px "DejaVu Sans", sans-serif`;
+  ctx.letterSpacing = `${(parseFloat(line.letter_spacing) || 0) * s}px`;
   ctx.textAlign = align;
-  ctx.textBaseline = "top";   // ffmpeg places text by its top edge
+  ctx.textBaseline = "top";   // Y is the top of the letters, same as the render
   const w = ctx.measureText(text).width;
   const left = align === "center" ? x - w / 2 : align === "right" ? x - w : x;
-  f._bounds = { x: left - 6, y: y - 6, w: w + 12, h: size + 12 };
+  state.dragItems.push({ pos, onDrag, bounds: { x: left - 6, y: y - 6, w: w + 12, h: size + 12 } });
 
-  const s = previewScale();
-  if (style.shadow) {
-    ctx.fillStyle = hexToRgba(style.shadowColor, 0.7);
-    ctx.fillText(text, x + style.shadowX * s, y + style.shadowY * s);
+  if (line.shadow_enabled) {
+    ctx.fillStyle = hexToRgba(line.shadow_color, 0.7);
+    ctx.fillText(text, x + (parseInt(line.shadow_x) || 0) * s, y + (parseInt(line.shadow_y) || 0) * s);
   }
-  if (style.outlineWidth > 0) {
-    ctx.lineWidth = style.outlineWidth * 2 * s;
-    ctx.strokeStyle = style.outlineColor;
+  const ow = parseInt(line.outline_width) || 0;
+  if (ow > 0) {
+    ctx.lineWidth = ow * 2 * s;
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = line.outline_color || "#000000";
     ctx.strokeText(text, x, y);
   }
-  ctx.fillStyle = color;
+  ctx.fillStyle = line.color || "#ffffff";
   ctx.fillText(text, x, y);
+  ctx.letterSpacing = "0px";
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
 }
 
-$("f-resolution").addEventListener("input", drawCanvas);
-
-// X/Y inputs and alignment stay in sync with dragging on the canvas.
+// ---------------------------------------------------------------------
+// the two show lines (fixed form fields)
+// ---------------------------------------------------------------------
 const LINE_KEYS = { nw: "now_watching", un: "up_next" };
+function lineFromDom(pfx) {
+  const pos = state.fields[LINE_KEYS[pfx]];
+  return {
+    source: $(`${pfx}-source`).value, template: $(`${pfx}-template`).value,
+    color: $(`${pfx}-color`).value, font_size: parseInt($(`${pfx}-size`).value) || 40,
+    x_pct: pos.x_pct, y_pct: pos.y_pct, align: pos.align || "left",
+    letter_spacing: parseFloat($(`${pfx}-spacing`).value) || 0,
+    outline_width: parseInt($(`${pfx}-outline-width`).value) || 0, outline_color: $(`${pfx}-outline-color`).value,
+    shadow_enabled: $(`${pfx}-shadow`).checked, shadow_color: $(`${pfx}-shadow-color`).value,
+    shadow_x: parseInt($(`${pfx}-shadow-x`).value) || 0, shadow_y: parseInt($(`${pfx}-shadow-y`).value) || 0,
+    swap_enabled: $(`${pfx}-swap`).checked, swap_template: $(`${pfx}-swap-text`).value,
+    swap_at: parseFloat($(`${pfx}-swap-at`).value) || 0, swap_crossfade: $(`${pfx}-swap-xfade`).checked,
+  };
+}
+function setLineDom(pfx, l) {
+  $(`${pfx}-source`).value = l.source || "next";
+  $(`${pfx}-template`).value = l.template ?? "";
+  $(`${pfx}-color`).value = l.color || "#ffffff";
+  $(`${pfx}-size`).value = l.font_size || 40;
+  $(`${pfx}-spacing`).value = l.letter_spacing || 0;
+  $(`${pfx}-outline-width`).value = l.outline_width || 0;
+  $(`${pfx}-outline-color`).value = l.outline_color || "#000000";
+  $(`${pfx}-shadow`).checked = l.shadow_enabled !== false;
+  $(`${pfx}-shadow-color`).value = l.shadow_color || "#000000";
+  $(`${pfx}-shadow-x`).value = l.shadow_x ?? 2;
+  $(`${pfx}-shadow-y`).value = l.shadow_y ?? 2;
+  $(`${pfx}-swap`).checked = !!l.swap_enabled;
+  $(`${pfx}-swap-text`).value = l.swap_template || "";
+  $(`${pfx}-swap-at`).value = l.swap_at ?? 3;
+  $(`${pfx}-swap-xfade`).checked = !!l.swap_crossfade;
+}
 function syncLineControls() {
   for (const [pfx, key] of Object.entries(LINE_KEYS)) {
     const f = state.fields[key];
@@ -497,45 +509,148 @@ for (const [pfx, key] of Object.entries(LINE_KEYS)) {
     syncLineControls();
     drawCanvas();
   });
+  for (const id of ["source", "template", "color", "size", "spacing", "outline-width", "outline-color",
+                    "shadow", "shadow-color", "shadow-x", "shadow-y", "swap", "swap-text", "swap-at", "swap-xfade"]) {
+    $(`${pfx}-${id}`).addEventListener("input", drawCanvas);
+    $(`${pfx}-${id}`).addEventListener("change", drawCanvas);
+  }
+  // Editing a swap moves the preview to just after it, so you can see the new text.
+  for (const id of ["swap", "swap-text", "swap-at"]) {
+    $(`${pfx}-${id}`).addEventListener("input", () => showTime(parseFloat($(`${pfx}-swap-at`).value) + 0.1));
+  }
 }
 
-canvas.addEventListener("mousedown", (e) => {
+// ---------------------------------------------------------------------
+// extra text lines (a list, like rectangles)
+// ---------------------------------------------------------------------
+const EXTRA_KEYS = ["template", "source", "x_pct", "y_pct", "align", "font_size", "color", "letter_spacing",
+  "outline_width", "outline_color", "shadow_enabled", "shadow_color", "shadow_x", "shadow_y",
+  "swap_enabled", "swap_template", "swap_at", "swap_crossfade"];
+$("add-extra").onclick = () => {
+  state.extras.push({ template: "SCHEDULE", source: "next", x_pct: 50, y_pct: 10, align: "center",
+    font_size: 60, color: "#ffffff", letter_spacing: 0, outline_width: 0, outline_color: "#000000",
+    shadow_enabled: true, shadow_color: "#000000", shadow_x: 2, shadow_y: 2,
+    swap_enabled: false, swap_template: "", swap_at: 3, swap_crossfade: false });
+  renderExtraList();
+  drawCanvas();
+};
+function syncExtraPos(extra) {
+  if (extra._inputs) {
+    extra._inputs.x_pct.value = Math.round(extra.x_pct * 2) / 2;
+    extra._inputs.y_pct.value = Math.round(extra.y_pct * 2) / 2;
+  }
+}
+function renderExtraList() {
+  const ul = $("extra-list");
+  ul.innerHTML = "";
+  state.extras.forEach((extra, i) => {
+    const li = document.createElement("li");
+    li.className = "extra-item";
+    const grid = document.createElement("div");
+    grid.className = "extra-grid";
+    extra._inputs = {};
+    const add = (labelText, key, type, opts = {}) => {
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      if (opts.cls) label.className = opts.cls;
+      let input;
+      if (type === "select") {
+        input = document.createElement("select");
+        for (const [v, t] of opts.options) { const o = document.createElement("option"); o.value = v; o.textContent = t; input.appendChild(o); }
+        input.value = extra[key] ?? opts.options[0][0];
+      } else {
+        input = document.createElement("input");
+        input.type = type;
+        if (opts.step) input.step = opts.step;
+        if (type === "checkbox") input.checked = !!extra[key]; else input.value = extra[key] ?? "";
+      }
+      const update = () => {
+        extra[key] = type === "checkbox" ? input.checked : type === "number" ? (parseFloat(input.value) || 0) : input.value;
+        if (key === "align" && input.value === "center") { extra.x_pct = 50; syncExtraPos(extra); }
+        if (key.startsWith("swap")) showTime((parseFloat(extra.swap_at) || 0) + 0.1); else drawCanvas();
+      };
+      input.addEventListener("input", update);
+      input.addEventListener("change", update);
+      extra._inputs[key] = input;
+      if (type === "checkbox") { label.textContent = ""; label.classList.add("inline"); label.append(input, " " + labelText); }
+      else label.appendChild(input);
+      grid.appendChild(label);
+    };
+    add("Text", "template", "text", { cls: "wide" });
+    add("{show} and {time} mean", "source", "select", { cls: "half", options: [["current", "current show"], ["next", "next show"], ["after_next", "show after next"]] });
+    add("Align", "align", "select", { cls: "half", options: [["left", "Left"], ["center", "Center"], ["right", "Right"]] });
+    add("X %", "x_pct", "number", { step: "0.5" });
+    add("Y %", "y_pct", "number", { step: "0.5" });
+    add("Size", "font_size", "number");
+    add("Spacing", "letter_spacing", "number");
+    add("Color", "color", "color");
+    add("Outline", "outline_width", "number");
+    add("Outline color", "outline_color", "color");
+    add("Shadow", "shadow_enabled", "checkbox");
+    add("Shadow color", "shadow_color", "color");
+    add("Shadow X", "shadow_x", "number");
+    add("Shadow Y", "shadow_y", "number");
+    add("Switch to different text partway through", "swap_enabled", "checkbox", { cls: "wide" });
+    add("Then show", "swap_template", "text", { cls: "half" });
+    add("At (seconds)", "swap_at", "number", { step: "0.1" });
+    add("Crossfade", "swap_crossfade", "checkbox");
+    const rm = document.createElement("button");
+    rm.className = "asset-remove"; rm.textContent = "✕ Remove"; rm.type = "button";
+    rm.onclick = () => { state.extras.splice(i, 1); renderExtraList(); drawCanvas(); };
+    li.append(grid, rm);
+    ul.appendChild(li);
+  });
+}
+function extrasForSave() {
+  return state.extras.map(e => Object.fromEntries(EXTRA_KEYS.map(k => [k, e[k]])));
+}
+
+// ---------------------------------------------------------------------
+// preview time slider
+// ---------------------------------------------------------------------
+function updateTimeSlider() {
+  const d = parseFloat($("f-duration").value) || 6;
+  $("preview-time").max = d;
+  if (parseFloat($("preview-time").value) > d) $("preview-time").value = d;
+  $("preview-time-label").textContent = `${parseFloat($("preview-time").value).toFixed(1)}s`;
+}
+function showTime(t) {
+  if (!Number.isNaN(t)) $("preview-time").value = Math.max(0, t);
+  updateTimeSlider();
+  drawCanvas();
+}
+$("preview-time").addEventListener("input", () => { updateTimeSlider(); drawCanvas(); });
+$("f-duration").addEventListener("input", () => { updateTimeSlider(); drawCanvas(); });
+$("f-resolution").addEventListener("input", drawCanvas);
+
+// ---------------------------------------------------------------------
+// dragging any text on the canvas
+// ---------------------------------------------------------------------
+function canvasPoint(e) {
   const rect = canvas.getBoundingClientRect();
-  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
-  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
-  for (const key of ["now_watching", "up_next"]) {
-    const b = state.fields[key]._bounds;
-    if (b && mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-      const f = state.fields[key];
-      state.dragTarget = key;
-      state.dragOffset = { x: mx - (f.x_pct / 100) * canvas.width, y: my - (f.y_pct / 100) * canvas.height };
+  return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas.height / rect.height) };
+}
+canvas.addEventListener("mousedown", (e) => {
+  const m = canvasPoint(e);
+  const items = state.dragItems || [];
+  for (let k = items.length - 1; k >= 0; k--) {   // top-most first
+    const { bounds: b, pos } = items[k];
+    if (m.x >= b.x && m.x <= b.x + b.w && m.y >= b.y && m.y <= b.y + b.h) {
+      state.drag = { item: items[k], off: { x: m.x - (pos.x_pct / 100) * canvas.width, y: m.y - (pos.y_pct / 100) * canvas.height } };
       break;
     }
   }
 });
 canvas.addEventListener("mousemove", (e) => {
-  if (!state.dragTarget) return;
-  const rect = canvas.getBoundingClientRect();
-  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
-  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
-  const off = state.dragOffset || { x: 0, y: 0 };
-  state.fields[state.dragTarget].x_pct = Math.max(0, Math.min(100, ((mx - off.x) / canvas.width) * 100));
-  state.fields[state.dragTarget].y_pct = Math.max(0, Math.min(100, ((my - off.y) / canvas.height) * 100));
-  syncLineControls();
+  if (!state.drag) return;
+  const m = canvasPoint(e);
+  const { item, off } = state.drag;
+  item.pos.x_pct = Math.max(0, Math.min(100, ((m.x - off.x) / canvas.width) * 100));
+  item.pos.y_pct = Math.max(0, Math.min(100, ((m.y - off.y) / canvas.height) * 100));
+  item.onDrag();
   drawCanvas();
 });
-window.addEventListener("mouseup", () => { state.dragTarget = null; });
-
-// redraw live as text/style options change
-[
-  "nw-source", "nw-template", "nw-color", "nw-size", "nw-outline-width", "nw-outline-color",
-  "nw-shadow", "nw-shadow-color", "nw-shadow-x", "nw-shadow-y",
-  "un-source", "un-template", "un-color", "un-size", "un-outline-width", "un-outline-color",
-  "un-shadow", "un-shadow-color", "un-shadow-x", "un-shadow-y",
-].forEach(id => {
-  $(id).addEventListener("input", drawCanvas);
-  $(id).addEventListener("change", drawCanvas);
-});
+window.addEventListener("mouseup", () => { state.drag = null; });
 
 // ---------------------------------------------------------------------
 // save / delete / generate
@@ -557,28 +672,9 @@ function collectPayload() {
     music_tracks: state.music,
     shapes: state.shapes,
     font_path: state.uploadedFont ? state.uploadedFont.path : "",
-    now_watching: {
-      source: $("nw-source").value, template: $("nw-template").value, color: $("nw-color").value,
-      font_size: parseInt($("nw-size").value), x_pct: state.fields.now_watching.x_pct,
-      y_pct: state.fields.now_watching.y_pct, align: state.fields.now_watching.align || "left",
-      outline_width: parseInt($("nw-outline-width").value) || 0,
-      outline_color: $("nw-outline-color").value,
-      shadow_enabled: $("nw-shadow").checked,
-      shadow_color: $("nw-shadow-color").value,
-      shadow_x: parseInt($("nw-shadow-x").value) || 0,
-      shadow_y: parseInt($("nw-shadow-y").value) || 0,
-    },
-    up_next: {
-      source: $("un-source").value, template: $("un-template").value, color: $("un-color").value,
-      font_size: parseInt($("un-size").value), x_pct: state.fields.up_next.x_pct,
-      y_pct: state.fields.up_next.y_pct, align: state.fields.up_next.align || "left",
-      outline_width: parseInt($("un-outline-width").value) || 0,
-      outline_color: $("un-outline-color").value,
-      shadow_enabled: $("un-shadow").checked,
-      shadow_color: $("un-shadow-color").value,
-      shadow_x: parseInt($("un-shadow-x").value) || 0,
-      shadow_y: parseInt($("un-shadow-y").value) || 0,
-    },
+    now_watching: lineFromDom("nw"),
+    up_next: lineFromDom("un"),
+    extra_texts: extrasForSave(),
     fade_enabled: $("f-fade").checked,
     tts_enabled: $("f-tts").checked,
     tts_voice: $("f-voice").value,
@@ -661,5 +757,7 @@ $("generate-now").onclick = async () => {
   renderBackgroundList();
   renderMusicList();
   renderShapeList();
+  renderExtraList();
+  updateTimeSlider();
   drawCanvas();
 })();

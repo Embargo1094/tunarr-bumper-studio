@@ -176,6 +176,7 @@ class ChannelIn(BaseModel):
     backgrounds: list = []       # [{ "path": str, "type": "image"|"gif"|"video", "name": str }]
     music_tracks: list = []      # [{ "path": str, "name": str }]
     shapes: list = []            # [{ x_pct, y_pct, width_pct, height_pct, color, opacity }]
+    extra_texts: list = []       # extra text lines: same fields as a text line (template, source, style, swap)
     font_path: str = ""
     now_watching: dict = None
     up_next: dict = None
@@ -406,31 +407,64 @@ def _join(segments) -> str:
     return re.sub(r"\s{2,}", " ", "".join(t for _, t in segments)).strip()
 
 
-def _build_lines(channel: dict, shows: dict) -> list[dict]:
-    """shows: {"current": (title, time), "next": (title, time), "after_next": (title, time)}"""
-    lines = []
+CROSSFADE_SECONDS = 0.5
+
+
+def _style(line: dict, key: str) -> dict:
+    return {
+        "x_pct": line.get("x_pct", 8), "y_pct": line.get("y_pct", 68 if key == "now_watching" else 80),
+        "align": line.get("align", "left"),
+        "font_size": line.get("font_size", 52 if key == "now_watching" else 40),
+        "color": line.get("color", "#FFFFFF"),
+        "outline_width": line.get("outline_width", 0), "outline_color": line.get("outline_color", "#000000"),
+        "shadow_enabled": line.get("shadow_enabled", True), "shadow_color": line.get("shadow_color", "#000000"),
+        "shadow_x": line.get("shadow_x", 2), "shadow_y": line.get("shadow_y", 2),
+        "letter_spacing": line.get("letter_spacing", 0) or 0,
+    }
+
+
+def _line_elements(line: dict, key: str, values: dict, duration: float, narrate: bool) -> list[dict]:
+    """One text line -> the elements to draw. With a swap, the line shows its
+    text until swap_at seconds, then the swap text in the same spot and style;
+    with crossfade the two blend over half a second around that moment."""
+    style = _style(line, key)
+    values = dict(values, show=values.get(line.get("source") or "next", ""),
+                  time=values.get(f"{line.get('source') or 'next'}_time", ""))
+    main = fill_template(line.get("template") or "", values)
+    main = main if main and _join(main) else None
+
+    swap = None
+    if line.get("swap_enabled"):
+        swap = fill_template(line.get("swap_template") or "", values)
+        swap = swap if swap and _join(swap) else None
+    if swap is None:
+        return [dict(style, text=_join(main), segments=main, narrate=narrate)] if main else []
+
+    t = min(max(float(line.get("swap_at") or 0), 0.1), max(duration - 0.1, 0.1))
+    xf = CROSSFADE_SECONDS / 2 if line.get("swap_crossfade") else 0
+    out = []
+    if main:
+        out.append(dict(style, text=_join(main), segments=main, narrate=narrate,
+                        start=0, end=t + xf, fade_out=2 * xf))
+    out.append(dict(style, text=_join(swap), segments=swap, narrate=False,
+                    start=t - xf, fade_in=2 * xf))
+    return out
+
+
+def _build_lines(channel: dict, shows: dict, duration: float = 6.0) -> list[dict]:
+    """shows: {"current": (title, time), "next": (title, time), "after_next": (title, time)}
+    Returns every text element to draw, in drawing order. Elements marked
+    narrate=True are the two show lines' main text, which narration reads."""
+    values = {}
+    for name in ("current", "next", "after_next"):
+        title, start = shows.get(name) or (None, "")
+        values[name], values[f"{name}_time"] = title or "", start or ""
+    elements = []
     for key in ("now_watching", "up_next"):
-        line = _line_settings(channel, key)
-        values = {}
-        for name in ("current", "next", "after_next"):
-            title, start = shows.get(name) or (None, "")
-            values[name], values[f"{name}_time"] = title or "", start or ""
-        values["show"] = values.get(line["source"], "")
-        values["time"] = values.get(f"{line['source']}_time", "")
-        segments = fill_template(line.get("template") or "", values)
-        if not segments or not _join(segments):
-            continue
-        lines.append({
-            "text": _join(segments), "segments": segments,
-            "x_pct": line.get("x_pct", 8), "y_pct": line.get("y_pct", 68 if key == "now_watching" else 80),
-            "align": line.get("align", "left"),
-            "font_size": line.get("font_size", 52 if key == "now_watching" else 40),
-            "color": line.get("color", "#FFFFFF"),
-            "outline_width": line.get("outline_width", 0), "outline_color": line.get("outline_color", "#000000"),
-            "shadow_enabled": line.get("shadow_enabled", True), "shadow_color": line.get("shadow_color", "#000000"),
-            "shadow_x": line.get("shadow_x", 2), "shadow_y": line.get("shadow_y", 2),
-        })
-    return lines
+        elements += _line_elements(_line_settings(channel, key), key, values, duration, narrate=True)
+    for extra in channel.get("extra_texts") or []:
+        elements += _line_elements(extra, "extra", values, duration, narrate=False)
+    return elements
 
 
 def _narration_for(lines: list[dict]) -> str:
@@ -438,6 +472,8 @@ def _narration_for(lines: list[dict]) -> str:
     words ("UP NEXT" -> "Up next"); show names are kept exactly as they are."""
     sentences = []
     for line in lines:
+        if not line.get("narrate", True):
+            continue
         spoken = []
         for is_value, text in line["segments"]:
             if not is_value:
@@ -482,8 +518,8 @@ def _render_channel(channel: dict, use_placeholder: bool = False):
             "after_next": (info.get("later_title"), fmt(info.get("later_start"))),
         }
 
-    fields = _build_lines(channel, shows)
     duration = channel.get("duration_seconds", 6.0)
+    fields = _build_lines(channel, shows, float(duration))
     cpu_limit_percent = settings.get("cpu_limit_percent", 0)
 
     narration_path = None

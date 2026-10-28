@@ -118,3 +118,15 @@ legend { color: #ffd400; font-size: 12px; padding: 0 6px; }
 
 .pos-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .pos-row label { margin-bottom: 8px; }
+
+.swap-box { border-top: 1px dashed #3c3c55; margin-top: 8px; padding-top: 8px; }
+label.inline { flex-direction: row; align-items: center; gap: 6px; }
+.time-row { flex-direction: row; align-items: center; gap: 8px; margin-top: 8px; }
+.time-row input[type="range"] { flex: 1; }
+.extra-item { display: block !important; }
+.extra-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.extra-grid label { font-size: 10px; margin-bottom: 4px; }
+.extra-grid .wide { grid-column: span 4; }
+.extra-grid .half { grid-column: span 2; }
+.extra-grid input, .extra-grid select { width: 100%; font-size: 11px; }
+.extra-grid input[type="color"] { padding: 0; height: 26px; }
