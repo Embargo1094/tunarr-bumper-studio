@@ -145,8 +145,9 @@ function clearEditorForm() {
   $("un-shadow-x").value = 2;
   $("un-shadow-y").value = 2;
 
-  state.fields.now_watching = { x_pct: 8, y_pct: 68 };
-  state.fields.up_next = { x_pct: 8, y_pct: 80 };
+  state.fields.now_watching = { x_pct: 8, y_pct: 68, align: "left" };
+  state.fields.up_next = { x_pct: 8, y_pct: 80, align: "left" };
+  syncLineControls();
   state.fallbackChannelNumber = "";
   state.fallbackChannelName = "";
   state.backgrounds = [];
@@ -197,8 +198,9 @@ function fillEditorForm(c) {
   $("un-shadow-x").value = un.shadow_x ?? 2;
   $("un-shadow-y").value = un.shadow_y ?? 2;
 
-  state.fields.now_watching = { x_pct: nw.x_pct ?? 8, y_pct: nw.y_pct ?? 68 };
-  state.fields.up_next = { x_pct: un.x_pct ?? 8, y_pct: un.y_pct ?? 80 };
+  state.fields.now_watching = { x_pct: nw.x_pct ?? 8, y_pct: nw.y_pct ?? 68, align: nw.align || "left" };
+  state.fields.up_next = { x_pct: un.x_pct ?? 8, y_pct: un.y_pct ?? 80, align: un.align || "left" };
+  syncLineControls();
   state.fallbackChannelNumber = c.tunarr_channel_number || "";
   state.fallbackChannelName = c.tunarr_channel_name || "";
 
@@ -385,7 +387,7 @@ function drawCanvas() {
   });
 
   drawLabel("now_watching", previewText("nw"), $("nw-color").value,
-    parseInt($("nw-size").value || 52) / 2, {
+    parseInt($("nw-size").value || 52) * previewScale(), {
       outlineWidth: parseInt($("nw-outline-width").value || 0),
       outlineColor: $("nw-outline-color").value,
       shadow: $("nw-shadow").checked,
@@ -394,7 +396,7 @@ function drawCanvas() {
       shadowY: parseInt($("nw-shadow-y").value || 0),
     });
   drawLabel("up_next", previewText("un"), $("un-color").value,
-    parseInt($("un-size").value || 40) / 2, {
+    parseInt($("un-size").value || 40) * previewScale(), {
       outlineWidth: parseInt($("un-outline-width").value || 0),
       outlineColor: $("un-outline-color").value,
       shadow: $("un-shadow").checked,
@@ -438,25 +440,63 @@ function hexToRgba(hex, alpha) {
   const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
+function previewScale() {
+  const w = parseInt(($("f-resolution").value || "1920x1080").split("x")[0]) || 1920;
+  return canvas.width / w;
+}
 function drawLabel(key, text, color, size, style) {
   const f = state.fields[key];
   const x = (f.x_pct / 100) * canvas.width;
   const y = (f.y_pct / 100) * canvas.height;
+  const align = f.align || "left";
   ctx.font = `bold ${size}px sans-serif`;
-  const metrics = ctx.measureText(text);
-  f._bounds = { x: x - 6, y: y - size, w: metrics.width + 12, h: size + 12 };
+  ctx.textAlign = align;
+  ctx.textBaseline = "top";   // ffmpeg places text by its top edge
+  const w = ctx.measureText(text).width;
+  const left = align === "center" ? x - w / 2 : align === "right" ? x - w : x;
+  f._bounds = { x: left - 6, y: y - 6, w: w + 12, h: size + 12 };
 
+  const s = previewScale();
   if (style.shadow) {
     ctx.fillStyle = hexToRgba(style.shadowColor, 0.7);
-    ctx.fillText(text, x + style.shadowX / 2, y + style.shadowY / 2);
+    ctx.fillText(text, x + style.shadowX * s, y + style.shadowY * s);
   }
   if (style.outlineWidth > 0) {
-    ctx.lineWidth = style.outlineWidth;
+    ctx.lineWidth = style.outlineWidth * 2 * s;
     ctx.strokeStyle = style.outlineColor;
     ctx.strokeText(text, x, y);
   }
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
+$("f-resolution").addEventListener("input", drawCanvas);
+
+// X/Y inputs and alignment stay in sync with dragging on the canvas.
+const LINE_KEYS = { nw: "now_watching", un: "up_next" };
+function syncLineControls() {
+  for (const [pfx, key] of Object.entries(LINE_KEYS)) {
+    const f = state.fields[key];
+    $(`${pfx}-x`).value = Math.round(f.x_pct * 2) / 2;
+    $(`${pfx}-y`).value = Math.round(f.y_pct * 2) / 2;
+    $(`${pfx}-align`).value = f.align || "left";
+  }
+}
+for (const [pfx, key] of Object.entries(LINE_KEYS)) {
+  for (const axis of ["x", "y"]) {
+    $(`${pfx}-${axis}`).addEventListener("input", (e) => {
+      const v = parseFloat(e.target.value);
+      if (!Number.isNaN(v)) { state.fields[key][`${axis}_pct`] = Math.max(0, Math.min(100, v)); drawCanvas(); }
+    });
+  }
+  $(`${pfx}-align`).addEventListener("change", (e) => {
+    state.fields[key].align = e.target.value;
+    if (e.target.value === "center") state.fields[key].x_pct = 50;   // centered on screen
+    syncLineControls();
+    drawCanvas();
+  });
 }
 
 canvas.addEventListener("mousedown", (e) => {
@@ -466,7 +506,9 @@ canvas.addEventListener("mousedown", (e) => {
   for (const key of ["now_watching", "up_next"]) {
     const b = state.fields[key]._bounds;
     if (b && mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
+      const f = state.fields[key];
       state.dragTarget = key;
+      state.dragOffset = { x: mx - (f.x_pct / 100) * canvas.width, y: my - (f.y_pct / 100) * canvas.height };
       break;
     }
   }
@@ -476,8 +518,10 @@ canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
   const my = (e.clientY - rect.top) * (canvas.height / rect.height);
-  state.fields[state.dragTarget].x_pct = Math.max(0, Math.min(100, (mx / canvas.width) * 100));
-  state.fields[state.dragTarget].y_pct = Math.max(0, Math.min(100, (my / canvas.height) * 100));
+  const off = state.dragOffset || { x: 0, y: 0 };
+  state.fields[state.dragTarget].x_pct = Math.max(0, Math.min(100, ((mx - off.x) / canvas.width) * 100));
+  state.fields[state.dragTarget].y_pct = Math.max(0, Math.min(100, ((my - off.y) / canvas.height) * 100));
+  syncLineControls();
   drawCanvas();
 });
 window.addEventListener("mouseup", () => { state.dragTarget = null; });
@@ -516,7 +560,7 @@ function collectPayload() {
     now_watching: {
       source: $("nw-source").value, template: $("nw-template").value, color: $("nw-color").value,
       font_size: parseInt($("nw-size").value), x_pct: state.fields.now_watching.x_pct,
-      y_pct: state.fields.now_watching.y_pct,
+      y_pct: state.fields.now_watching.y_pct, align: state.fields.now_watching.align || "left",
       outline_width: parseInt($("nw-outline-width").value) || 0,
       outline_color: $("nw-outline-color").value,
       shadow_enabled: $("nw-shadow").checked,
@@ -527,7 +571,7 @@ function collectPayload() {
     up_next: {
       source: $("un-source").value, template: $("un-template").value, color: $("un-color").value,
       font_size: parseInt($("un-size").value), x_pct: state.fields.up_next.x_pct,
-      y_pct: state.fields.up_next.y_pct,
+      y_pct: state.fields.up_next.y_pct, align: state.fields.up_next.align || "left",
       outline_width: parseInt($("un-outline-width").value) || 0,
       outline_color: $("un-outline-color").value,
       shadow_enabled: $("un-shadow").checked,

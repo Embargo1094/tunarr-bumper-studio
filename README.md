@@ -137,6 +137,12 @@ words, and a colon becomes a short pause; show names and times are read as-is.
 "Fade text and music in/out" (on by default) fades the text over the first and
 last half second and fades the music out at the end. Turn it off for hard cuts.
 
+Each line has an **Align** setting and **X % / Y %** position (also set by
+dragging the text on the canvas). With Left, X is the text's left edge; with
+Center, X is its middle, so centered text stays centered whatever the length
+of the show name (picking Center sets X to 50, the middle of the screen); with
+Right, X is its right edge. Y is the top of the text.
+
 Start times use the `TZ` setting in the stack (default `America/New_York`).
 
 ## Multiple channels

@@ -248,7 +248,8 @@ def render_bumper(
       { "x_pct": float, "y_pct": float, "width_pct": float, "height_pct": float,
         "color": "#RRGGBB", "opacity": float (0-1) }
     fields: list of dicts, each:
-      { "text": str, "x_pct": float, "y_pct": float, "font_size": int, "color": "#RRGGBB",
+      { "text": str, "x_pct": float, "y_pct": float, "align": "left"|"center"|"right",
+        "font_size": int, "color": "#RRGGBB",
         "outline_width": int (0 = none), "outline_color": "#RRGGBB",
         "shadow_enabled": bool, "shadow_color": "#RRGGBB", "shadow_x": int, "shadow_y": int }
     cpu_limit_percent: 0 = unlimited; otherwise caps ffmpeg to that % of one CPU core
@@ -274,8 +275,17 @@ def render_bumper(
     for f in fields:
         if not f.get("text"):
             continue
-        x = int(f.get("x_pct", 10) / 100 * width)
+        anchor_x = int(f.get("x_pct", 10) / 100 * width)
         y = int(f.get("y_pct", 70) / 100 * height)
+        # x_pct is where the text's left edge, center, or right edge sits, so
+        # centered text stays centered whatever the length of the show name.
+        align = f.get("align", "left")
+        if align == "center":
+            x = f"{anchor_x}-text_w/2"
+        elif align == "right":
+            x = f"{anchor_x}-text_w"
+        else:
+            x = str(anchor_x)
         size = int(f.get("font_size", 42))
         color = f.get("color", "#FFFFFF").lstrip("#")
         text = _escape_drawtext(f["text"])

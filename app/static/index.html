@@ -98,6 +98,15 @@
           <legend>Text line 1</legend>
           <label>{show} and {time} mean <select id="nw-source"><option value="current">the current show (the one that just ended)</option><option value="next" selected>the next show</option><option value="after_next">the show after next</option></select></label>
           <label>Text <input id="nw-template" value="UP NEXT: {show}"></label>
+          <label>Align <select id="nw-align">
+            <option value="left">Left (X is the left edge)</option>
+            <option value="center">Center (X is the middle)</option>
+            <option value="right">Right (X is the right edge)</option>
+          </select></label>
+          <div class="pos-row">
+            <label>X % <input type="number" id="nw-x" step="0.5" min="0" max="100"></label>
+            <label>Y % <input type="number" id="nw-y" step="0.5" min="0" max="100"></label>
+          </div>
           <label>Color <input type="color" id="nw-color" value="#ffd400"></label>
           <label>Font size <input type="number" id="nw-size" value="52"></label>
           <label>Outline width (0 = none) <input type="number" id="nw-outline-width" value="0" min="0"></label>
@@ -112,6 +121,15 @@
           <legend>Text line 2</legend>
           <label>{show} and {time} mean <select id="un-source"><option value="current">the current show (the one that just ended)</option><option value="next">the next show</option><option value="after_next" selected>the show after next</option></select></label>
           <label>Text <input id="un-template" value="FOLLOWED BY: {show}"></label>
+          <label>Align <select id="un-align">
+            <option value="left">Left (X is the left edge)</option>
+            <option value="center">Center (X is the middle)</option>
+            <option value="right">Right (X is the right edge)</option>
+          </select></label>
+          <div class="pos-row">
+            <label>X % <input type="number" id="un-x" step="0.5" min="0" max="100"></label>
+            <label>Y % <input type="number" id="un-y" step="0.5" min="0" max="100"></label>
+          </div>
           <label>Color <input type="color" id="un-color" value="#ffffff"></label>
           <label>Font size <input type="number" id="un-size" value="40"></label>
           <label>Outline width (0 = none) <input type="number" id="un-outline-width" value="0" min="0"></label>

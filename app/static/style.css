@@ -115,3 +115,6 @@ legend { color: #ffd400; font-size: 12px; padding: 0 6px; }
 .shape-row input[type="number"] { width: 100%; font-size: 11px; }
 .shape-row input[type="color"] { width: 100%; padding: 0; height: 26px; }
 .shape-row label { font-size: 9px; margin-bottom: 0; gap: 2px; }
+
+.pos-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pos-row label { margin-bottom: 8px; }

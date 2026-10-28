@@ -423,6 +423,7 @@ def _build_lines(channel: dict, shows: dict) -> list[dict]:
         lines.append({
             "text": _join(segments), "segments": segments,
             "x_pct": line.get("x_pct", 8), "y_pct": line.get("y_pct", 68 if key == "now_watching" else 80),
+            "align": line.get("align", "left"),
             "font_size": line.get("font_size", 52 if key == "now_watching" else 40),
             "color": line.get("color", "#FFFFFF"),
             "outline_width": line.get("outline_width", 0), "outline_color": line.get("outline_color", "#000000"),
