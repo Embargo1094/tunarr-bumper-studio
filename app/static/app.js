@@ -414,7 +414,8 @@ function previewScale() {
 // Which text a line shows at time t (its swap text after swap_at).
 function textAt(line, t) {
   const main = fillPreview(line.template, line.source);
-  if (line.swap_enabled && (line.swap_template || "").trim() && t >= (parseFloat(line.swap_at) || 0)) {
+  // After the switch time: the switch text, or nothing if it's left blank.
+  if (line.swap_enabled && t >= (parseFloat(line.swap_at) || 0)) {
     return fillPreview(line.swap_template, line.source);
   }
   return main;

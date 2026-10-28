@@ -433,12 +433,12 @@ def _line_elements(line: dict, key: str, values: dict, duration: float, narrate:
     main = fill_template(line.get("template") or "", values)
     main = main if main and _join(main) else None
 
-    swap = None
-    if line.get("swap_enabled"):
-        swap = fill_template(line.get("swap_template") or "", values)
-        swap = swap if swap and _join(swap) else None
-    if swap is None:
+    if not line.get("swap_enabled"):
         return [dict(style, text=_join(main), segments=main, narrate=narrate)] if main else []
+    # With a switch, the line's text always ends at swap_at. A blank switch text
+    # (or one naming a show the guide doesn't have) just hides the line from then on.
+    swap = fill_template(line.get("swap_template") or "", values)
+    swap = swap if swap and _join(swap) else None
 
     t = min(max(float(line.get("swap_at") or 0), 0.1), max(duration - 0.1, 0.1))
     xf = CROSSFADE_SECONDS / 2 if line.get("swap_crossfade") else 0
@@ -446,8 +446,9 @@ def _line_elements(line: dict, key: str, values: dict, duration: float, narrate:
     if main:
         out.append(dict(style, text=_join(main), segments=main, narrate=narrate,
                         start=0, end=t + xf, fade_out=2 * xf))
-    out.append(dict(style, text=_join(swap), segments=swap, narrate=False,
-                    start=t - xf, fade_in=2 * xf))
+    if swap:
+        out.append(dict(style, text=_join(swap), segments=swap, narrate=False,
+                        start=t - xf, fade_in=2 * xf))
     return out
 
 

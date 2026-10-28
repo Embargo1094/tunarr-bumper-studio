@@ -149,7 +149,8 @@ between every letter of a line.
 **Switching text:** any text line can switch to a different text partway
 through the clip ("Switch to different text partway through"): set the text to
 switch to (placeholders work) and the second it happens at. It appears in the
-same spot and style. **Crossfade** (off by default) blends the two over half a
+same spot and style. Leave the switch text blank to make the line disappear at
+that second instead. **Crossfade** (off by default) blends the two over half a
 second; otherwise it's a hard cut. Narration only reads the two show lines'
 main text.
 
