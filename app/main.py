@@ -181,6 +181,7 @@ class ChannelIn(BaseModel):
     now_watching: dict = None
     up_next: dict = None
     fade_enabled: bool = True
+    strip_year: bool = True
     tts_enabled: bool = False
     tts_voice: str = ""
     enabled: bool = True
@@ -407,6 +408,17 @@ def _join(segments) -> str:
     return re.sub(r"\s{2,}", " ", "".join(t for _, t in segments)).strip()
 
 
+TRAILING_YEAR_RE = re.compile(r"\s*[\(\[]\s*(?:19|20)\d{2}\s*[\)\]]\s*$")
+
+
+def strip_year(title: str | None) -> str | None:
+    """"The Twilight Zone (1985)" -> "The Twilight Zone". Only a bracketed year
+    at the very end is removed."""
+    if not title:
+        return title
+    return TRAILING_YEAR_RE.sub("", title).strip() or title
+
+
 CROSSFADE_SECONDS = 0.5
 
 
@@ -518,6 +530,8 @@ def _render_channel(channel: dict, use_placeholder: bool = False):
             "next": (info["next_title"], fmt(info["next_start"])),
             "after_next": (info.get("later_title"), fmt(info.get("later_start"))),
         }
+    if channel.get("strip_year", True):
+        shows = {k: (strip_year(t), when) for k, (t, when) in shows.items()}
 
     duration = channel.get("duration_seconds", 6.0)
     fields = _build_lines(channel, shows, float(duration))

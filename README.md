@@ -158,6 +158,10 @@ main text.
 They have the same options as the show lines, including switching. Use the
 **Preview at** slider under the canvas to see what's on screen at any second.
 
+**Hide (year) after show names** (on by default) turns "The Twilight Zone
+(1985)" into "The Twilight Zone" on the bumper and in narration. Only a year in
+brackets at the very end of a name is removed.
+
 Start times use the `TZ` setting in the stack (default `America/New_York`).
 
 ## Multiple channels

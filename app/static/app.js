@@ -122,6 +122,7 @@ function clearEditorForm() {
   $("f-resolution").value = "1920x1080";
   $("f-tts").checked = false;
   $("f-fade").checked = true;
+  $("f-strip-year").checked = true;
   $("f-voice").value = "";
   $("f-enabled").checked = true;
 
@@ -157,6 +158,7 @@ function fillEditorForm(c) {
   $("f-resolution").value = c.resolution;
   $("f-tts").checked = !!c.tts_enabled;
   $("f-fade").checked = c.fade_enabled !== false;
+  $("f-strip-year").checked = c.strip_year !== false;
   $("f-voice").value = c.tts_voice || "";
   $("f-enabled").checked = !!c.enabled;
 
@@ -677,6 +679,7 @@ function collectPayload() {
     up_next: lineFromDom("un"),
     extra_texts: extrasForSave(),
     fade_enabled: $("f-fade").checked,
+    strip_year: $("f-strip-year").checked,
     tts_enabled: $("f-tts").checked,
     tts_voice: $("f-voice").value,
     enabled: $("f-enabled").checked,
